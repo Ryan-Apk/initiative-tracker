@@ -48,11 +48,11 @@ npm run dev:check
 npm run start:check
 ```
 
-## Production at `init.mrivory124.com`
+## Productio
 
 Production is deliberately same-origin:
 
-- the browser loads `https://init.mrivory124.com`;
+- the browser loads `https://init.example.com`;
 - Socket.IO connects to `/socket.io` on that same origin;
 - the reverse proxy terminates TLS and forwards all HTTP and WebSocket traffic to the Node container; and
 - Node serves the built Vite files, `/api/health`, and Socket.IO from one port.
@@ -65,7 +65,7 @@ Set secrets and start the service:
 
 ```bash
 export DM_PASSWORD='use-a-long-random-password'
-export PUBLIC_ORIGIN='https://init.mrivory124.com'
+export PUBLIC_ORIGIN='https://init.example.com'
 docker compose up --build -d
 ```
 
@@ -88,8 +88,8 @@ This implementation does not use a cookie session framework, so there is no `SES
 
 Before public use:
 
-1. Point the `init` A/AAAA record for `mrivory124.com` to the server.
-2. Obtain a valid TLS certificate for `init.mrivory124.com`.
+1. Point the `init` A/AAAA record for `example.com` to the server.
+2. Obtain a valid TLS certificate for `init.example.com`.
 3. Proxy the entire origin—including `/socket.io`—to `127.0.0.1:3000`.
 4. Preserve the host and forwarding headers, and enable WebSocket upgrades.
 5. Do not serve the Vite `dist` folder separately; Node must receive Socket.IO traffic.
@@ -97,7 +97,7 @@ Before public use:
 Example Caddy configuration:
 
 ```caddy
-init.mrivory124.com {
+init.example.com {
     reverse_proxy 127.0.0.1:3000
 }
 ```
