@@ -1,0 +1,18 @@
+services:
+  initiative-tracker:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DM_PASSWORD: "${DM_PASSWORD:?Set DM_PASSWORD before starting the tracker}"
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-https://init.mrivory124.com}"
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      TRUST_PROXY: "1"
+      DATABASE_PATH: "/data/initiative.sqlite"
+    volumes:
+      - initiative-data:/data
+    restart: unless-stopped
+
+volumes:
+  initiative-data:
