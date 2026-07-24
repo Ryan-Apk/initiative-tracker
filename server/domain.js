@@ -119,7 +119,8 @@ export function healthTone({ hpCurrent, hpMax }) {
   if (hpCurrent <= 0) return "defeated";
 
   const ratio = Math.min(hpCurrent / hpMax, 1) * 100;
-  if (ratio > 50) return "healthy";
-  if (ratio >= 26) return "wounded";
-  return "critical";
+  if (ratio >= 75) return "green";
+  if (ratio >= 50) return "yellow";
+  if (ratio > 25) return "orange";
+  return "red";
 }

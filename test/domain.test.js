@@ -7,6 +7,7 @@ import {
   normalizeCombatant,
   sortCombatants,
 } from "../server/domain.js";
+import { healthTone as clientHealthTone } from "../src/health.js";
 
 test("sortCombatants applies every server tie-break in order", () => {
   const combatants = [
@@ -66,15 +67,24 @@ test("normalizeChanges rejects protected and non-integer values", () => {
   );
 });
 
-test("healthTone follows neutral, green, amber, red, and gray boundaries", () => {
-  assert.equal(healthTone({ hpCurrent: null, hpMax: 10 }), "neutral");
-  assert.equal(healthTone({ hpCurrent: 20, hpMax: null }), "neutral");
-  assert.equal(healthTone({ hpCurrent: 101, hpMax: 100 }), "healthy");
-  assert.equal(healthTone({ hpCurrent: 51, hpMax: 100 }), "healthy");
-  assert.equal(healthTone({ hpCurrent: 50, hpMax: 100 }), "wounded");
-  assert.equal(healthTone({ hpCurrent: 26, hpMax: 100 }), "wounded");
-  assert.equal(healthTone({ hpCurrent: 25, hpMax: 100 }), "critical");
-  assert.equal(healthTone({ hpCurrent: 1, hpMax: 100 }), "critical");
-  assert.equal(healthTone({ hpCurrent: 0, hpMax: 100 }), "defeated");
-  assert.equal(healthTone({ hpCurrent: -3, hpMax: 100 }), "defeated");
+test("server and client health tones agree at every exact boundary", () => {
+  const cases = [
+    [{ hpCurrent: null, hpMax: 100 }, "neutral"],
+    [{ hpCurrent: 100, hpMax: null }, "neutral"],
+    [{ hpCurrent: 0, hpMax: 100 }, "defeated"],
+    [{ hpCurrent: 1, hpMax: 100 }, "red"],
+    [{ hpCurrent: 25, hpMax: 100 }, "red"],
+    [{ hpCurrent: 26, hpMax: 100 }, "orange"],
+    [{ hpCurrent: 49, hpMax: 100 }, "orange"],
+    [{ hpCurrent: 50, hpMax: 100 }, "yellow"],
+    [{ hpCurrent: 74, hpMax: 100 }, "yellow"],
+    [{ hpCurrent: 75, hpMax: 100 }, "green"],
+    [{ hpCurrent: 100, hpMax: 100 }, "green"],
+    [{ hpCurrent: 150, hpMax: 100 }, "green"],
+  ];
+
+  for (const [combatant, expected] of cases) {
+    assert.equal(healthTone(combatant), expected);
+    assert.equal(clientHealthTone(combatant), expected);
+  }
 });

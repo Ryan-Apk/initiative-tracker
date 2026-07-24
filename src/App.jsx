@@ -5,6 +5,7 @@ import {
   socket,
   storeDmToken,
 } from "./socket.js";
+import { healthLabels, healthTone } from "./health.js";
 
 const EMPTY_FORM = {
   name: "",
@@ -24,21 +25,13 @@ const FIELD_LABELS = {
   hpMax: "Max HP",
 };
 
-function healthTone(combatant) {
-  if (combatant.hpCurrent === null || combatant.hpMax === null) return "neutral";
-  if (combatant.hpCurrent <= 0) return "defeated";
-  const percentage = Math.min(combatant.hpCurrent / combatant.hpMax, 1) * 100;
-  if (percentage > 50) return "healthy";
-  if (percentage >= 26) return "wounded";
-  return "critical";
-}
-
 const rowTone = {
-  neutral: "border-stone-300 bg-white",
-  healthy: "border-emerald-300 bg-emerald-50",
-  wounded: "border-amber-300 bg-amber-50",
-  critical: "border-red-300 bg-red-50",
-  defeated: "border-slate-400 bg-slate-200 text-slate-600",
+  neutral: "border-2 border-stone-400 bg-stone-100",
+  green: "border-2 border-green-800 bg-green-300",
+  yellow: "border-2 border-yellow-700 bg-yellow-300",
+  orange: "border-2 border-orange-800 bg-orange-300",
+  red: "border-2 border-red-900 bg-red-400",
+  defeated: "border-2 border-black bg-black text-white",
 };
 
 function EditableField({
@@ -81,13 +74,13 @@ function EditableField({
 
   return (
     <label className={`grid min-w-0 gap-1 ${className}`}>
-      <span className="truncate text-[0.65rem] font-bold uppercase tracking-wider text-stone-500">
+      <span className="w-fit max-w-full truncate rounded-sm bg-white/80 px-1 text-[0.65rem] font-bold uppercase tracking-wider text-stone-700">
         {FIELD_LABELS[field]}
       </span>
       {canEdit ? (
         <input
           aria-label={`${FIELD_LABELS[field]} for ${combatant.name}`}
-          className="min-w-0 w-full rounded-md border border-transparent bg-white/65 px-2 py-2 text-sm font-semibold outline-none transition focus:border-ember focus:bg-white focus:ring-2 focus:ring-orange-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-w-0 w-full rounded-md border border-stone-400 bg-white/90 px-2 py-2 text-sm font-semibold text-ink outline-none transition focus:border-ember focus:bg-white focus:ring-2 focus:ring-orange-100 disabled:cursor-not-allowed disabled:opacity-60"
           disabled={!connected}
           inputMode={inputMode}
           onBlur={commit}
@@ -106,7 +99,7 @@ function EditableField({
           value={draft}
         />
       ) : (
-        <span className="block min-h-10 min-w-0 truncate rounded-md px-2 py-2 text-sm font-semibold">
+        <span className="block min-h-10 min-w-0 truncate rounded-md border border-black/20 bg-white/80 px-2 py-2 text-sm font-semibold text-ink">
           {serverValue === "" ? "—" : serverValue}
         </span>
       )}
@@ -134,21 +127,24 @@ function CombatantRow({ combatant, connected, isDm, onResult, position }) {
 
   return (
     <article
-      className={`min-w-0 rounded-xl border p-3 shadow-sm transition-colors sm:p-4 ${rowTone[tone]}`}
+      className={`min-w-0 rounded-xl p-3 shadow-sm transition-colors sm:p-4 ${rowTone[tone]}`}
     >
       <div className="mb-3 flex min-w-0 items-center justify-between gap-3 border-b border-black/10 pb-3">
         <div className="flex min-w-0 items-baseline gap-3">
-          <span className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-stone-500">
+          <span className="rounded-sm bg-white/80 px-1 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-stone-700">
             Order
           </span>
           <strong className="font-display text-3xl tabular-nums">
             {String(position).padStart(2, "0")}
           </strong>
-          <span className="truncate text-xs text-stone-500">
+          <span className={`truncate text-xs ${tone === "defeated" ? "text-stone-200" : "text-stone-700"}`}>
             Initiative {combatant.initiativeRoll}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <span className="rounded-full border border-black/25 bg-white/85 px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-stone-900">
+            {healthLabels[tone]}
+          </span>
           {isDm ? (
             <button
               className={`rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition disabled:opacity-50 ${
@@ -163,7 +159,7 @@ function CombatantRow({ combatant, connected, isDm, onResult, position }) {
               {combatant.playerControlled ? "Player" : "DM"}
             </button>
           ) : (
-            <span className="text-center text-xs font-bold uppercase tracking-wide text-stone-500">
+            <span className="rounded-full border border-black/20 bg-white/80 px-3 py-1.5 text-center text-xs font-bold uppercase tracking-wide text-stone-800">
               {combatant.playerControlled ? "Player" : "DM"}
             </span>
           )}
