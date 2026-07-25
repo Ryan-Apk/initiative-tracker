@@ -109,7 +109,8 @@ function EditableField({
 
 function CombatantRow({ combatant, connected, isDm, onResult, position }) {
   const canEdit = isDm || combatant.playerControlled;
-  const tone = healthTone(combatant);
+  const showsHealth = isDm || combatant.playerControlled;
+  const tone = showsHealth ? healthTone(combatant) : "neutral";
 
   async function toggleControl() {
     onResult(
@@ -142,9 +143,11 @@ function CombatantRow({ combatant, connected, isDm, onResult, position }) {
           </span>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-          <span className="rounded-full border border-black/25 bg-white/85 px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-stone-900">
-            {healthLabels[tone]}
-          </span>
+          {showsHealth && (
+            <span className="rounded-full border border-black/25 bg-white/85 px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-stone-900">
+              {healthLabels[tone]}
+            </span>
+          )}
           {isDm ? (
             <button
               className={`rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide transition disabled:opacity-50 ${
@@ -177,7 +180,13 @@ function CombatantRow({ combatant, connected, isDm, onResult, position }) {
           )}
         </div>
       </div>
-      <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-[minmax(11rem,2fr)_repeat(5,minmax(4.5rem,1fr))]">
+      <div
+        className={`grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 ${
+          showsHealth
+            ? "lg:grid-cols-[minmax(11rem,2fr)_repeat(5,minmax(4.5rem,1fr))]"
+            : "lg:grid-cols-[minmax(11rem,2fr)_repeat(3,minmax(4.5rem,1fr))]"
+        }`}
+      >
         <EditableField
           canEdit={canEdit}
           className="col-span-2 sm:col-span-3 lg:col-span-1"
@@ -209,22 +218,26 @@ function CombatantRow({ combatant, connected, isDm, onResult, position }) {
           onCommit={onResult}
           optional
         />
-        <EditableField
-          canEdit={canEdit}
-          combatant={combatant}
-          connected={connected}
-          field="hpCurrent"
-          onCommit={onResult}
-          optional
-        />
-        <EditableField
-          canEdit={canEdit}
-          combatant={combatant}
-          connected={connected}
-          field="hpMax"
-          onCommit={onResult}
-          optional
-        />
+        {showsHealth && (
+          <>
+            <EditableField
+              canEdit={canEdit}
+              combatant={combatant}
+              connected={connected}
+              field="hpCurrent"
+              onCommit={onResult}
+              optional
+            />
+            <EditableField
+              canEdit={canEdit}
+              combatant={combatant}
+              connected={connected}
+              field="hpMax"
+              onCommit={onResult}
+              optional
+            />
+          </>
+        )}
       </div>
     </article>
   );

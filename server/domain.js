@@ -112,6 +112,18 @@ export function sortCombatants(combatants) {
   });
 }
 
+export function snapshotForViewer(snapshot, viewerIsDm) {
+  if (viewerIsDm) return snapshot;
+  return {
+    ...snapshot,
+    combatants: snapshot.combatants.map((combatant) =>
+      combatant.playerControlled
+        ? combatant
+        : { ...combatant, hpCurrent: null, hpMax: null },
+    ),
+  };
+}
+
 export function healthTone({ hpCurrent, hpMax }) {
   if (hpCurrent === null || hpCurrent === undefined || hpMax === null || hpMax === undefined) {
     return "neutral";

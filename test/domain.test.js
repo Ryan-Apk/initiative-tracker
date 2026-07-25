@@ -5,6 +5,7 @@ import {
   healthTone,
   normalizeChanges,
   normalizeCombatant,
+  snapshotForViewer,
   sortCombatants,
 } from "../server/domain.js";
 import { healthTone as clientHealthTone } from "../src/health.js";
@@ -87,4 +88,20 @@ test("server and client health tones agree at every exact boundary", () => {
     assert.equal(healthTone(combatant), expected);
     assert.equal(clientHealthTone(combatant), expected);
   }
+});
+
+test("public snapshots expose HP only for player-controlled combatants", () => {
+  const snapshot = {
+    revision: 7,
+    combatants: [
+      { id: "player", playerControlled: true, hpCurrent: 12, hpMax: 20 },
+      { id: "enemy", playerControlled: false, hpCurrent: 45, hpMax: 60 },
+    ],
+  };
+
+  assert.equal(snapshotForViewer(snapshot, false).combatants[0].hpCurrent, 12);
+  assert.equal(snapshotForViewer(snapshot, false).combatants[0].hpMax, 20);
+  assert.equal(snapshotForViewer(snapshot, false).combatants[1].hpCurrent, null);
+  assert.equal(snapshotForViewer(snapshot, false).combatants[1].hpMax, null);
+  assert.strictEqual(snapshotForViewer(snapshot, true), snapshot);
 });

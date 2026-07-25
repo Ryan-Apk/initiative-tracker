@@ -8,6 +8,7 @@ import {
   ValidationError,
   normalizeChanges,
   normalizeCombatant,
+  snapshotForViewer,
 } from "./domain.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -91,22 +92,29 @@ export function createApplication({
   }
 
   function sendSnapshot(snapshot = database.snapshot()) {
-    io.emit("state:snapshot", snapshot);
+    for (const client of io.sockets.sockets.values()) {
+      client.emit("state:snapshot", snapshotForViewer(snapshot, isDm(client)));
+    }
     return snapshot;
   }
 
   io.on("connection", (socket) => {
     resumeDmSession(socket, socket.handshake.auth?.dmToken);
-    socket.emit("state:snapshot", database.snapshot());
+    socket.emit("state:snapshot", snapshotForViewer(database.snapshot(), isDm(socket)));
     socket.emit("dm:status", { isDm: isDm(socket) });
 
     socket.on("state:request", (acknowledge) => {
-      respond(acknowledge, { ok: true, snapshot: database.snapshot(), isDm: isDm(socket) });
+      respond(acknowledge, {
+        ok: true,
+        snapshot: snapshotForViewer(database.snapshot(), isDm(socket)),
+        isDm: isDm(socket),
+      });
     });
 
     socket.on("dm:resume", (payload, acknowledge) => {
       const resumed = resumeDmSession(socket, payload?.token);
       socket.emit("dm:status", { isDm: resumed });
+      socket.emit("state:snapshot", snapshotForViewer(database.snapshot(), resumed));
       respond(acknowledge, {
         ok: resumed,
         isDm: resumed,
@@ -124,6 +132,7 @@ export function createApplication({
       dmSessions.set(token, Date.now());
       socket.data.dmToken = token;
       socket.emit("dm:status", { isDm: true });
+      socket.emit("state:snapshot", database.snapshot());
       respond(acknowledge, { ok: true, token });
     });
 
@@ -131,6 +140,7 @@ export function createApplication({
       if (socket.data.dmToken) dmSessions.delete(socket.data.dmToken);
       socket.data.dmToken = null;
       socket.emit("dm:status", { isDm: false });
+      socket.emit("state:snapshot", snapshotForViewer(database.snapshot(), false));
       respond(acknowledge, { ok: true });
     });
 
