@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   ValidationError,
   healthTone,
+  initiativeTotal,
+  lowestAvailableMapNumber,
   normalizeChanges,
   normalizeCombatant,
   snapshotForViewer,
@@ -12,10 +14,10 @@ import { healthTone as clientHealthTone } from "../src/health.js";
 
 test("sortCombatants applies every server tie-break in order", () => {
   const combatants = [
-    { id: "4", name: "Zed", initiativeRoll: 14, initiativeModifier: 2 },
-    { id: "3", name: "bram", initiativeRoll: 14, initiativeModifier: 3 },
-    { id: "2", name: "Ada", initiativeRoll: 14, initiativeModifier: 3 },
-    { id: "1", name: "Late", initiativeRoll: 12, initiativeModifier: 99 },
+    { id: "4", name: "Zed", initiativeRoll: 12, initiativeModifier: 2 },
+    { id: "3", name: "bram", initiativeRoll: 11, initiativeModifier: 3 },
+    { id: "2", name: "Ada", initiativeRoll: 11, initiativeModifier: 3 },
+    { id: "1", name: "Late", initiativeRoll: 12, initiativeModifier: 0 },
   ];
 
   assert.deepEqual(
@@ -33,6 +35,18 @@ test("sortCombatants uses id when names match case-insensitively", () => {
   assert.deepEqual(
     sortCombatants(combatants).map(({ id }) => id),
     ["a", "b"],
+  );
+});
+
+test("initiative totals and reusable map numbers are derived consistently", () => {
+  assert.equal(initiativeTotal({ initiativeRoll: 20, initiativeModifier: 2 }), 22);
+  assert.equal(
+    lowestAvailableMapNumber([
+      { mapNumber: 1 },
+      { mapNumber: 3 },
+      { mapNumber: null },
+    ]),
+    2,
   );
 });
 
@@ -93,15 +107,58 @@ test("server and client health tones agree at every exact boundary", () => {
 test("public snapshots expose HP only for player-controlled combatants", () => {
   const snapshot = {
     revision: 7,
+    playerLocked: true,
     combatants: [
-      { id: "player", playerControlled: true, hpCurrent: 12, hpMax: 20 },
-      { id: "enemy", playerControlled: false, hpCurrent: 45, hpMax: 60 },
+      {
+        id: "player",
+        playerControlled: true,
+        initiativeRoll: 18,
+        initiativeModifier: 2,
+        initiativeTotal: 20,
+        ac: 16,
+        acVisible: false,
+        hpCurrent: 12,
+        hpMax: 20,
+        healthTone: "yellow",
+      },
+      {
+        id: "hidden-enemy",
+        playerControlled: false,
+        initiativeRoll: 15,
+        initiativeModifier: 3,
+        initiativeTotal: 18,
+        ac: 17,
+        acVisible: false,
+        hpCurrent: 45,
+        hpMax: 60,
+        healthTone: "green",
+      },
+      {
+        id: "revealed-enemy",
+        playerControlled: false,
+        initiativeRoll: 10,
+        initiativeModifier: 1,
+        initiativeTotal: 11,
+        ac: 13,
+        acVisible: true,
+        hpCurrent: 1,
+        hpMax: 20,
+        healthTone: "red",
+      },
     ],
   };
 
-  assert.equal(snapshotForViewer(snapshot, false).combatants[0].hpCurrent, 12);
-  assert.equal(snapshotForViewer(snapshot, false).combatants[0].hpMax, 20);
-  assert.equal(snapshotForViewer(snapshot, false).combatants[1].hpCurrent, null);
-  assert.equal(snapshotForViewer(snapshot, false).combatants[1].hpMax, null);
+  const publicSnapshot = snapshotForViewer(snapshot, false);
+  assert.equal(publicSnapshot.playerLocked, true);
+  assert.equal(publicSnapshot.combatants[0].hpCurrent, 12);
+  assert.equal(publicSnapshot.combatants[0].initiativeModifier, 2);
+  assert.equal(publicSnapshot.combatants[1].hpCurrent, null);
+  assert.equal(publicSnapshot.combatants[1].hpMax, null);
+  assert.equal(publicSnapshot.combatants[1].initiativeRoll, null);
+  assert.equal(publicSnapshot.combatants[1].initiativeModifier, null);
+  assert.equal(publicSnapshot.combatants[1].initiativeTotal, 18);
+  assert.equal(publicSnapshot.combatants[1].healthTone, "green");
+  assert.equal(publicSnapshot.combatants[1].ac, null);
+  assert.equal(publicSnapshot.combatants[2].ac, 13);
   assert.strictEqual(snapshotForViewer(snapshot, true), snapshot);
 });

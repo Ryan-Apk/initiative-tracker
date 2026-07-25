@@ -59,6 +59,7 @@ test("server enforces control, revisions, sorting, and SQLite persistence", asyn
   assert.equal(publicAdd.ok, true);
   assert.equal(publicAdd.revision, 1);
   assert.equal(database.snapshot().combatants[0].playerControlled, true);
+  assert.equal(database.snapshot().combatants[0].initiativeTotal, 16);
 
   const badLogin = await command(dmClient, "dm:login", { password: "wrong" });
   assert.equal(badLogin.ok, false);
@@ -70,6 +71,7 @@ test("server enforces control, revisions, sorting, and SQLite persistence", asyn
     name: "Ada",
     initiativeRoll: 15,
     initiativeModifier: 2,
+    ac: 14,
     hpCurrent: 8,
     hpMax: 10,
   });
@@ -79,31 +81,140 @@ test("server enforces control, revisions, sorting, and SQLite persistence", asyn
   const snapshotAfterAdds = database.snapshot();
   assert.equal(snapshotAfterAdds.combatants[0].name, "Ada");
   assert.equal(snapshotAfterAdds.combatants[0].playerControlled, false);
+  assert.equal(snapshotAfterAdds.combatants[0].initiativeTotal, 17);
+  assert.equal(snapshotAfterAdds.combatants[0].mapNumber, 1);
+  assert.equal(snapshotAfterAdds.combatants[0].acVisible, false);
+
+  const publicState = await command(publicClient, "state:request");
+  const publicAda = publicState.snapshot.combatants.find(({ id }) => id === dmAdd.id);
+  assert.equal(publicAda.initiativeTotal, 17);
+  assert.equal(publicAda.initiativeRoll, null);
+  assert.equal(publicAda.initiativeModifier, null);
+  assert.equal(publicAda.hpCurrent, null);
+  assert.equal(publicAda.hpMax, null);
+  assert.equal(publicAda.healthTone, "green");
+
+  const revealAc = await command(dmClient, "combatant:set-ac-visible", {
+    id: dmAdd.id,
+    visible: true,
+  });
+  assert.equal(revealAc.ok, true);
+  assert.equal(revealAc.revision, 3);
+  const revealedPublicState = await command(publicClient, "state:request");
+  assert.equal(
+    revealedPublicState.snapshot.combatants.find(({ id }) => id === dmAdd.id).ac,
+    14,
+  );
+
+  const lock = await command(dmClient, "tracker:set-player-locked", {
+    locked: true,
+  });
+  assert.equal(lock.ok, true);
+  assert.equal(lock.revision, 4);
+  assert.equal(database.snapshot().playerLocked, true);
+
+  const rejectedLockedAdd = await command(publicClient, "combatant:add", {
+    name: "Blocked",
+    initiativeRoll: 10,
+    initiativeModifier: 0,
+  });
+  assert.equal(rejectedLockedAdd.ok, false);
+  assert.match(rejectedLockedAdd.error, /locked/i);
 
   const rejectedEdit = await command(publicClient, "combatant:update", {
-    id: dmAdd.id,
+    id: publicAdd.id,
     changes: { hpCurrent: 2 },
   });
   assert.equal(rejectedEdit.ok, false);
-  assert.equal(database.snapshot().revision, 2);
+  assert.match(rejectedEdit.error, /locked/i);
+  assert.equal(database.snapshot().revision, 4);
+
+  const dmEditWhileLocked = await command(dmClient, "combatant:update", {
+    id: dmAdd.id,
+    changes: { hpCurrent: 6 },
+  });
+  assert.equal(dmEditWhileLocked.ok, true);
+  assert.equal(dmEditWhileLocked.revision, 5);
+
+  const unlock = await command(dmClient, "tracker:set-player-locked", {
+    locked: false,
+  });
+  assert.equal(unlock.ok, true);
+  assert.equal(unlock.revision, 6);
 
   const classification = await command(dmClient, "combatant:set-player-controlled", {
     id: dmAdd.id,
     playerControlled: true,
   });
   assert.equal(classification.ok, true);
-  assert.equal(classification.revision, 3);
+  assert.equal(classification.revision, 7);
+  assert.equal(
+    database.snapshot().combatants.find(({ id }) => id === dmAdd.id).mapNumber,
+    null,
+  );
 
   const acceptedEdit = await command(publicClient, "combatant:update", {
     id: dmAdd.id,
     changes: { hpCurrent: 2 },
   });
   assert.equal(acceptedEdit.ok, true);
-  assert.equal(acceptedEdit.revision, 4);
-  assert.equal(database.snapshot().combatants[0].hpCurrent, 2);
+  assert.equal(acceptedEdit.revision, 8);
+  assert.equal(
+    database.snapshot().combatants.find(({ id }) => id === dmAdd.id).hpCurrent,
+    2,
+  );
+
+  const enemyOne = await command(dmClient, "combatant:add", {
+    name: "Enemy One",
+    initiativeRoll: 10,
+    initiativeModifier: 0,
+  });
+  const enemyTwo = await command(dmClient, "combatant:add", {
+    name: "Enemy Two",
+    initiativeRoll: 9,
+    initiativeModifier: 0,
+  });
+  assert.equal(
+    database.snapshot().combatants.find(({ id }) => id === enemyOne.id).mapNumber,
+    1,
+  );
+  assert.equal(
+    database.snapshot().combatants.find(({ id }) => id === enemyTwo.id).mapNumber,
+    2,
+  );
+
+  const removeEnemyOne = await command(dmClient, "combatant:remove", {
+    id: enemyOne.id,
+  });
+  assert.equal(removeEnemyOne.ok, true);
+  const replacement = await command(dmClient, "combatant:add", {
+    name: "Replacement",
+    initiativeRoll: 8,
+    initiativeModifier: 0,
+  });
+  assert.equal(
+    database.snapshot().combatants.find(({ id }) => id === replacement.id).mapNumber,
+    1,
+  );
+
+  const showAllAc = await command(dmClient, "combatants:set-enemy-ac-visible", {
+    visible: true,
+  });
+  assert.equal(showAllAc.ok, true);
+  assert.equal(
+    database.snapshot().combatants
+      .filter(({ playerControlled }) => !playerControlled)
+      .every(({ acVisible }) => acVisible),
+    true,
+  );
+
+  const finalLock = await command(dmClient, "tracker:set-player-locked", {
+    locked: true,
+  });
+  assert.equal(finalLock.ok, true);
 
   const reopened = createDatabase(databasePath);
-  assert.equal(reopened.snapshot().revision, 4);
-  assert.equal(reopened.snapshot().combatants.length, 2);
+  assert.equal(reopened.snapshot().playerLocked, true);
+  assert.equal(reopened.snapshot().combatants.length, 4);
   reopened.close();
 });

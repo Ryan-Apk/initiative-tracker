@@ -104,7 +104,7 @@ function labelFor(field) {
 export function sortCombatants(combatants) {
   return [...combatants].sort((first, second) => {
     return (
-      second.initiativeRoll - first.initiativeRoll ||
+      initiativeTotal(second) - initiativeTotal(first) ||
       second.initiativeModifier - first.initiativeModifier ||
       first.name.localeCompare(second.name, undefined, { sensitivity: "base" }) ||
       first.id.localeCompare(second.id)
@@ -112,15 +112,36 @@ export function sortCombatants(combatants) {
   });
 }
 
+export function initiativeTotal(combatant) {
+  return combatant.initiativeRoll + combatant.initiativeModifier;
+}
+
+export function lowestAvailableMapNumber(combatants) {
+  const used = new Set(
+    combatants
+      .map((combatant) => combatant.mapNumber)
+      .filter((mapNumber) => Number.isInteger(mapNumber) && mapNumber > 0),
+  );
+  let candidate = 1;
+  while (used.has(candidate)) candidate += 1;
+  return candidate;
+}
+
 export function snapshotForViewer(snapshot, viewerIsDm) {
   if (viewerIsDm) return snapshot;
   return {
     ...snapshot,
-    combatants: snapshot.combatants.map((combatant) =>
-      combatant.playerControlled
-        ? combatant
-        : { ...combatant, hpCurrent: null, hpMax: null },
-    ),
+    combatants: snapshot.combatants.map((combatant) => {
+      if (combatant.playerControlled) return combatant;
+      return {
+        ...combatant,
+        initiativeRoll: null,
+        initiativeModifier: null,
+        ac: combatant.acVisible ? combatant.ac : null,
+        hpCurrent: null,
+        hpMax: null,
+      };
+    }),
   };
 }
 

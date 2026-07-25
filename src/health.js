@@ -24,3 +24,12 @@ export const healthLabels = {
   yellow: "Hurt · 50–74%",
   green: "Healthy · 75%+",
 };
+
+export const publicHealthLabels = {
+  neutral: "HP not tracked",
+  defeated: "Defeated",
+  red: "Critical",
+  orange: "Wounded",
+  yellow: "Hurt",
+  green: "Healthy",
+};

@@ -6,6 +6,7 @@ import express from "express";
 import { Server } from "socket.io";
 import {
   ValidationError,
+  lowestAvailableMapNumber,
   normalizeChanges,
   normalizeCombatant,
   snapshotForViewer,
@@ -91,6 +92,27 @@ export function createApplication({
     return true;
   }
 
+  function playerEditingLocked() {
+    return Boolean(
+      database.raw
+        .prepare("SELECT player_locked FROM tracker_meta WHERE singleton = 1")
+        .get().player_locked,
+    );
+  }
+
+  function requirePlayerEditing(socket) {
+    if (!isDm(socket) && playerEditingLocked()) {
+      throw new ValidationError("The DM has locked player editing.");
+    }
+  }
+
+  function nextMapNumber(db) {
+    const assigned = db
+      .prepare("SELECT map_number AS mapNumber FROM combatants WHERE map_number IS NOT NULL")
+      .all();
+    return lowestAvailableMapNumber(assigned);
+  }
+
   function sendSnapshot(snapshot = database.snapshot()) {
     for (const client of io.sockets.sockets.values()) {
       client.emit("state:snapshot", snapshotForViewer(snapshot, isDm(client)));
@@ -146,15 +168,18 @@ export function createApplication({
 
     socket.on("combatant:add", (payload, acknowledge) => {
       try {
+        requirePlayerEditing(socket);
         const combatant = normalizeCombatant(payload);
         const id = crypto.randomUUID();
         const playerControlled = !isDm(socket);
         const snapshot = database.commit((db) => {
+          const mapNumber = playerControlled ? null : nextMapNumber(db);
           db.prepare(`
             INSERT INTO combatants (
               id, name, initiative_roll, initiative_modifier, ac,
-              hp_current, hp_max, player_controlled, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              hp_current, hp_max, player_controlled, map_number,
+              ac_visible, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             id,
             combatant.name,
@@ -164,6 +189,8 @@ export function createApplication({
             combatant.hpCurrent,
             combatant.hpMax,
             Number(playerControlled),
+            mapNumber,
+            0,
             new Date().toISOString(),
           );
         });
@@ -176,6 +203,7 @@ export function createApplication({
 
     socket.on("combatant:update", (payload, acknowledge) => {
       try {
+        requirePlayerEditing(socket);
         if (typeof payload?.id !== "string") {
           throw new ValidationError("A combatant must be selected.");
         }
@@ -221,12 +249,82 @@ export function createApplication({
           throw new ValidationError("Invalid control change.");
         }
         const snapshot = database.commit((db) => {
+          const mapNumber = payload.playerControlled ? null : nextMapNumber(db);
           const result = db
-            .prepare("UPDATE combatants SET player_controlled = ? WHERE id = ?")
-            .run(Number(payload.playerControlled), payload.id);
+            .prepare(`
+              UPDATE combatants
+              SET player_controlled = ?, map_number = ?, ac_visible = 0
+              WHERE id = ?
+            `)
+            .run(Number(payload.playerControlled), mapNumber, payload.id);
           if (result.changes !== 1) {
             throw new ValidationError("That combatant no longer exists.");
           }
+        });
+        sendSnapshot(snapshot);
+        respond(acknowledge, { ok: true, revision: snapshot.revision });
+      } catch (error) {
+        respond(acknowledge, { ok: false, error: serializeError(error) });
+      }
+    });
+
+    socket.on("combatant:set-ac-visible", (payload, acknowledge) => {
+      try {
+        if (!isDm(socket)) throw new ValidationError("Only the DM can reveal enemy AC.");
+        if (typeof payload?.id !== "string" || typeof payload?.visible !== "boolean") {
+          throw new ValidationError("Invalid AC visibility change.");
+        }
+        const snapshot = database.commit((db) => {
+          const result = db
+            .prepare(`
+              UPDATE combatants
+              SET ac_visible = ?
+              WHERE id = ? AND player_controlled = 0
+            `)
+            .run(Number(payload.visible), payload.id);
+          if (result.changes !== 1) {
+            throw new ValidationError("That enemy no longer exists.");
+          }
+        });
+        sendSnapshot(snapshot);
+        respond(acknowledge, { ok: true, revision: snapshot.revision });
+      } catch (error) {
+        respond(acknowledge, { ok: false, error: serializeError(error) });
+      }
+    });
+
+    socket.on("combatants:set-enemy-ac-visible", (payload, acknowledge) => {
+      try {
+        if (!isDm(socket)) throw new ValidationError("Only the DM can reveal enemy AC.");
+        if (typeof payload?.visible !== "boolean") {
+          throw new ValidationError("Invalid AC visibility change.");
+        }
+        const snapshot = database.commit((db) => {
+          db.prepare(`
+            UPDATE combatants
+            SET ac_visible = ?
+            WHERE player_controlled = 0
+          `).run(Number(payload.visible));
+        });
+        sendSnapshot(snapshot);
+        respond(acknowledge, { ok: true, revision: snapshot.revision });
+      } catch (error) {
+        respond(acknowledge, { ok: false, error: serializeError(error) });
+      }
+    });
+
+    socket.on("tracker:set-player-locked", (payload, acknowledge) => {
+      try {
+        if (!isDm(socket)) throw new ValidationError("Only the DM can lock player editing.");
+        if (typeof payload?.locked !== "boolean") {
+          throw new ValidationError("Invalid tracker lock change.");
+        }
+        const snapshot = database.commit((db) => {
+          db.prepare(`
+            UPDATE tracker_meta
+            SET player_locked = ?
+            WHERE singleton = 1
+          `).run(Number(payload.locked));
         });
         sendSnapshot(snapshot);
         respond(acknowledge, { ok: true, revision: snapshot.revision });

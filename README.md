@@ -124,9 +124,14 @@ Run one application replica. SQLite and in-memory DM sessions are intentionally 
 
 - Anyone can add a combatant. Entries added outside DM mode begin player-controlled.
 - Any client can edit player-controlled entries. Only the DM can edit DM-controlled entries, reclassify, remove, or clear.
-- Public clients see HP values and health colours only for player-controlled entries. DM-controlled HP is redacted by the server and shown only while logged into DM mode.
+- The DM can persistently lock player editing. While locked, public clients cannot add or edit anything; the DM retains full control.
+- Initiative Roll stores the unmodified base roll. The server calculates and sorts by Roll + Modifier, then uses modifier, name, and UUID to break ties.
+- DM-controlled entries receive the lowest available map number. These stable numerals are independent of initiative order and reused after deletion.
+- Public clients see exact HP only for player-controlled entries. Enemies expose a derived word/colour health state while current and maximum HP remain server-redacted.
+- Enemy base rolls and modifiers are private; public clients receive only the calculated initiative total.
+- Enemy AC begins hidden. The DM can reveal it per enemy or show/hide all current enemy AC values in one action.
 - Edits commit on blur or Enter; Escape cancels.
-- The server sorts by roll descending, modifier descending, case-insensitive name ascending, then UUID.
+- The server sorts by calculated initiative total descending, modifier descending, case-insensitive name ascending, then UUID.
 - Every accepted mutation increments a persisted revision and broadcasts a complete canonical snapshot.
 - Field updates are partial. Concurrent edits to different fields merge; the last server-received edit wins for the same field.
 - Controls are disabled offline, mutations are volatile, and reconnecting replaces local drafts with the current server snapshot.
