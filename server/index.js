@@ -30,12 +30,20 @@ httpServer.listen(config.port, config.host, () => {
   if (config.publicOrigin) console.log(`[server] public origin: ${config.publicOrigin}`);
 });
 
-function shutdown() {
-  application.close();
-  httpServer.close(() => {
+let shuttingDown = false;
+
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  try {
+    await application.close();
     database.close();
     process.exit(0);
-  });
+  } catch (error) {
+    console.error("[server] Failed to shut down cleanly:", error);
+    process.exit(1);
+  }
 }
 
 process.on("SIGINT", shutdown);

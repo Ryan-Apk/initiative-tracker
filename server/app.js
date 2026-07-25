@@ -367,9 +367,9 @@ export function createApplication({
   return {
     app,
     io,
-    close() {
+    async close() {
       dmSessions.clear();
-      io.close();
+      await io.close();
     },
   };
 }

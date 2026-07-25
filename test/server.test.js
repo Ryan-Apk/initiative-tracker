@@ -45,8 +45,7 @@ test("server enforces control, revisions, sorting, and SQLite persistence", asyn
   context.after(async () => {
     publicClient.disconnect();
     dmClient.disconnect();
-    application.close();
-    await new Promise((resolve) => httpServer.close(resolve));
+    await application.close();
     database.close();
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
   });
