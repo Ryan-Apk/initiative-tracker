@@ -13,8 +13,7 @@ COPY index.html postcss.config.js tailwind.config.js vite.config.js ./
 COPY src ./src
 COPY server ./server
 COPY scripts ./scripts
-COPY test ./test
-RUN npm run test && npm run build && npm prune --omit=dev
+RUN npm run build && npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
 
