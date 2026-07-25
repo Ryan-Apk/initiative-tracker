@@ -124,12 +124,13 @@ Run one application replica. SQLite and in-memory DM sessions are intentionally 
 
 - Anyone can add a combatant. Entries added outside DM mode begin player-controlled.
 - Any client can edit player-controlled entries. Only the DM can edit DM-controlled entries, reclassify, remove, or clear.
+- Public clients see HP values and health colours only for player-controlled entries. DM-controlled HP is redacted by the server and shown only while logged into DM mode.
 - Edits commit on blur or Enter; Escape cancels.
 - The server sorts by roll descending, modifier descending, case-insensitive name ascending, then UUID.
 - Every accepted mutation increments a persisted revision and broadcasts a complete canonical snapshot.
 - Field updates are partial. Concurrent edits to different fields merge; the last server-received edit wins for the same field.
 - Controls are disabled offline, mutations are volatile, and reconnecting replaces local drafts with the current server snapshot.
-- HP rows are neutral if either HP value is missing, green above 50%, amber at 26–50%, red at 1–25%, and gray at 0 or below. Current HP may exceed maximum.
+- HP rows are neutral if either HP value is missing; black at 0 or below; red above 0 through 25%; orange above 25% through below 50%; yellow from 50% through below 75%; and green at 75% or above. Current HP may exceed maximum and its color ratio caps at 100%.
 
 Names are required and limited to 80 characters. Initiative and modifier must be whole numbers. AC is optional and non-negative. Current HP is an optional whole number; maximum HP is an optional positive whole number. Server validation errors are returned through Socket.IO acknowledgements and displayed in the UI.
 
