@@ -2,7 +2,7 @@
 
 A live initiative board for the Rivergate table. The browser application is Vite, React, and Tailwind; an Express/Socket.IO server owns the canonical state and persists it to SQLite.
 
-Created with help from Claude, used regularly in my D&D games. 
+Designed from the ground up by me, written with help from Claude, used regularly in my D&D games. 
 
 ## Development
 
