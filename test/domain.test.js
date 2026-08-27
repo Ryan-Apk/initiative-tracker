@@ -1,16 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ALL_CONDITIONS,
   ValidationError,
+  applyConditionToggle,
   healthTone,
   initiativeTotal,
   lowestAvailableMapNumber,
   normalizeChanges,
   normalizeCombatant,
+  normalizeConditionName,
+  parseConditions,
   snapshotForViewer,
   sortCombatants,
 } from "../server/domain.js";
 import { healthTone as clientHealthTone } from "../src/health.js";
+import { ALL_CONDITIONS as clientAllConditions } from "../src/conditions.js";
 
 test("sortCombatants applies every server tie-break in order", () => {
   const combatants = [
@@ -161,4 +166,41 @@ test("public snapshots expose HP only for player-controlled combatants", () => {
   assert.equal(publicSnapshot.combatants[1].ac, null);
   assert.equal(publicSnapshot.combatants[2].ac, 13);
   assert.strictEqual(snapshotForViewer(snapshot, true), snapshot);
+});
+
+test("server and client condition lists agree and stay alphabetical", () => {
+  assert.deepEqual(ALL_CONDITIONS, clientAllConditions);
+  const alphabetical = [...ALL_CONDITIONS].sort((first, second) => first.localeCompare(second));
+  assert.deepEqual(ALL_CONDITIONS, alphabetical);
+});
+
+test("normalizeConditionName only accepts known conditions", () => {
+  assert.equal(normalizeConditionName("Prone"), "Prone");
+  assert.throws(() => normalizeConditionName("prone"), ValidationError);
+  assert.throws(() => normalizeConditionName("Made up"), ValidationError);
+  assert.throws(() => normalizeConditionName(42), ValidationError);
+});
+
+test("parseConditions tolerates missing, malformed, and foreign values", () => {
+  assert.deepEqual(parseConditions(undefined), []);
+  assert.deepEqual(parseConditions("not json"), []);
+  assert.deepEqual(parseConditions('["Prone","Nonsense"]'), ["Prone"]);
+  assert.deepEqual(parseConditions(["Blinded", "Prone"]), ["Blinded", "Prone"]);
+});
+
+test("applyConditionToggle appends newest at the end and is idempotent", () => {
+  const afterFirst = applyConditionToggle([], "Prone", true);
+  assert.deepEqual(afterFirst, ["Prone"]);
+
+  const afterSecond = applyConditionToggle(afterFirst, "Blinded", true);
+  assert.deepEqual(afterSecond, ["Prone", "Blinded"]);
+
+  assert.deepEqual(applyConditionToggle(afterSecond, "Prone", true), afterSecond);
+
+  const afterRemoval = applyConditionToggle(afterSecond, "Prone", false);
+  assert.deepEqual(afterRemoval, ["Blinded"]);
+  assert.deepEqual(applyConditionToggle(afterRemoval, "Prone", false), afterRemoval);
+
+  const reAdded = applyConditionToggle(afterRemoval, "Prone", true);
+  assert.deepEqual(reAdded, ["Blinded", "Prone"]);
 });

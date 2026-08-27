@@ -35,6 +35,7 @@ test("fresh databases store base rolls and persistent tracker state", (context) 
   assert.equal(snapshot.combatants[0].initiativeTotal, 22);
   assert.equal(snapshot.combatants[0].mapNumber, 1);
   assert.equal(snapshot.combatants[0].acVisible, false);
+  assert.deepEqual(snapshot.combatants[0].conditions, []);
 });
 
 test("legacy migration preserves totals and assigns enemy map numbers once", (context) => {
@@ -81,6 +82,7 @@ test("legacy migration preserves totals and assigns enemy map numbers once", (co
   assert.equal(player.initiativeTotal, 18);
   assert.equal(player.mapNumber, null);
   assert.equal(firstSnapshot.playerLocked, false);
+  assert.deepEqual(enemyA.conditions, []);
   migrated.close();
 
   const reopened = createDatabase(databasePath);

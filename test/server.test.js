@@ -217,3 +217,112 @@ test("server enforces control, revisions, sorting, and SQLite persistence", asyn
   assert.equal(reopened.snapshot().combatants.length, 4);
   reopened.close();
 });
+
+test("conditions are toggled in insertion order and respect the same ownership rules as edits", async (context) => {
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "initiative-test-"));
+  const databasePath = path.join(temporaryDirectory, "tracker.sqlite");
+  const database = createDatabase(databasePath);
+  const httpServer = http.createServer();
+  const application = createApplication({
+    httpServer,
+    database,
+    dmPassword: "test-password",
+  });
+
+  await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+  const address = httpServer.address();
+  const url = `http://127.0.0.1:${address.port}`;
+  const publicClient = await connectClient(url);
+  const dmClient = await connectClient(url);
+
+  context.after(async () => {
+    publicClient.disconnect();
+    dmClient.disconnect();
+    await application.close();
+    database.close();
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  await command(dmClient, "dm:login", { password: "test-password" });
+
+  const playerAdd = await command(publicClient, "combatant:add", {
+    name: "Player One",
+    initiativeRoll: 10,
+    initiativeModifier: 0,
+  });
+  const enemyAdd = await command(dmClient, "combatant:add", {
+    name: "Enemy One",
+    initiativeRoll: 8,
+    initiativeModifier: 0,
+  });
+
+  const unknownCondition = await command(publicClient, "combatant:set-condition", {
+    id: playerAdd.id,
+    condition: "Not a condition",
+    active: true,
+  });
+  assert.equal(unknownCondition.ok, false);
+
+  const rejectedEnemyEdit = await command(publicClient, "combatant:set-condition", {
+    id: enemyAdd.id,
+    condition: "Prone",
+    active: true,
+  });
+  assert.equal(rejectedEnemyEdit.ok, false);
+  assert.match(rejectedEnemyEdit.error, /DM/i);
+
+  const addBlinded = await command(publicClient, "combatant:set-condition", {
+    id: playerAdd.id,
+    condition: "Blinded",
+    active: true,
+  });
+  assert.equal(addBlinded.ok, true);
+  const addProne = await command(publicClient, "combatant:set-condition", {
+    id: playerAdd.id,
+    condition: "Prone",
+    active: true,
+  });
+  assert.equal(addProne.ok, true);
+  assert.deepEqual(
+    database.snapshot().combatants.find(({ id }) => id === playerAdd.id).conditions,
+    ["Blinded", "Prone"],
+  );
+
+  const removeBlinded = await command(publicClient, "combatant:set-condition", {
+    id: playerAdd.id,
+    condition: "Blinded",
+    active: false,
+  });
+  assert.equal(removeBlinded.ok, true);
+  const reAddBlinded = await command(publicClient, "combatant:set-condition", {
+    id: playerAdd.id,
+    condition: "Blinded",
+    active: true,
+  });
+  assert.equal(reAddBlinded.ok, true);
+  assert.deepEqual(
+    database.snapshot().combatants.find(({ id }) => id === playerAdd.id).conditions,
+    ["Prone", "Blinded"],
+  );
+
+  const dmEditsEnemy = await command(dmClient, "combatant:set-condition", {
+    id: enemyAdd.id,
+    condition: "Restrained",
+    active: true,
+  });
+  assert.equal(dmEditsEnemy.ok, true);
+  assert.deepEqual(
+    database.snapshot().combatants.find(({ id }) => id === enemyAdd.id).conditions,
+    ["Restrained"],
+  );
+
+  const lock = await command(dmClient, "tracker:set-player-locked", { locked: true });
+  assert.equal(lock.ok, true);
+  const lockedEdit = await command(publicClient, "combatant:set-condition", {
+    id: playerAdd.id,
+    condition: "Stunned",
+    active: true,
+  });
+  assert.equal(lockedEdit.ok, false);
+  assert.match(lockedEdit.error, /locked/i);
+});

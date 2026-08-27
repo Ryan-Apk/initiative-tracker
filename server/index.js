@@ -1,9 +1,17 @@
+/**
+ * Backend process entry point. Wires the pieces together in order: load and
+ * validate config, open the SQLite store, build the Express + Socket.IO
+ * application, start listening, and install signal handlers for a clean
+ * shutdown. This is the file `node` actually runs in production and dev.
+ */
 import "dotenv/config";
 import http from "node:http";
 import { createApplication } from "./app.js";
 import { loadServerConfig } from "./config.js";
 import { createDatabase } from "./database.js";
 
+// Validate configuration first; a misconfigured server must fail fast and loud
+// rather than start in an unsafe or surprising state.
 let config;
 try {
   config = loadServerConfig();
@@ -32,6 +40,8 @@ httpServer.listen(config.port, config.host, () => {
 
 let shuttingDown = false;
 
+// Close Socket.IO and the database once, then exit. Guarded so overlapping
+// SIGINT/SIGTERM signals cannot trigger a double shutdown.
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;

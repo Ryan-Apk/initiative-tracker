@@ -1,5 +1,13 @@
+/**
+ * Environment configuration loader and validator for the backend. Turns raw
+ * process.env into one validated, typed config object, applying different rules
+ * for development vs production (ports, allowed CORS origins, database path,
+ * HTTPS enforcement). server/index.js calls this at startup and exits on any
+ * invalid configuration, so the server never boots in a half-configured state.
+ */
 import path from "node:path";
 
+// Parse and range-check a TCP port, falling back to a default when unset.
 function parsePort(value, fallback, label) {
   const port = Number(value ?? fallback);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -8,6 +16,8 @@ function parsePort(value, fallback, label) {
   return port;
 }
 
+// Parse a comma-separated list of exact HTTP(S) origins, rejecting anything
+// with a path or non-http scheme (Socket.IO's allowlist must be exact origins).
 function parseOrigins(value, label) {
   if (!value) return [];
   return value.split(",").map((entry) => {
@@ -25,6 +35,8 @@ function parseOrigins(value, label) {
   });
 }
 
+// Interpret the TRUST_PROXY env var the way Express expects: boolean, a hop
+// count (number of trusted proxies), or a subnet/string passed through as-is.
 function parseTrustProxy(value) {
   if (!value || value === "false") return false;
   if (value === "true") return true;
@@ -32,6 +44,9 @@ function parseTrustProxy(value) {
   return value;
 }
 
+// Build the full validated config for the given mode. Throws (with a message
+// meant for the operator) on any missing or invalid setting: absent/short DM
+// password, bad ports/origins, or a non-HTTPS public origin in production.
 export function loadServerConfig({
   environment = process.env,
   mode = environment.NODE_ENV || "development",

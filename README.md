@@ -136,6 +136,7 @@ Run one application replica. SQLite and in-memory DM sessions are intentionally 
 - Field updates are partial. Concurrent edits to different fields merge; the last server-received edit wins for the same field.
 - Controls are disabled offline, mutations are volatile, and reconnecting replaces local drafts with the current server snapshot.
 - HP rows are neutral if either HP value is missing; black at 0 or below; red above 0 through 25%; orange above 25% through below 50%; yellow from 50% through below 75%; and green at 75% or above. Current HP may exceed maximum and its color ratio caps at 100%.
+- Conditions come from a fixed 5e list (Blinded through Unconscious) applied through an "Add conditions" dropdown; the same edit rule as every other field applies, so only the DM edits DM-controlled entries and only a combatant's own player edits theirs while unlocked. Conditions are visible to everyone, are not clickable, and appear in the order added, oldest first. Beyond four active conditions, or whenever the card is too narrow to show them all, the trigger label switches to "+N more".
 
 Names are required and limited to 80 characters. Initiative and modifier must be whole numbers. AC is optional and non-negative. Current HP is an optional whole number; maximum HP is an optional positive whole number. Server validation errors are returned through Socket.IO acknowledgements and displayed in the UI.
 
