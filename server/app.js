@@ -10,11 +10,10 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import {fileURLToPath} from "node:url";
 import express from "express";
-import { Server } from "socket.io";
+import {Server} from "socket.io";
 import {
-  ValidationError,
   applyConditionToggle,
   lowestAvailableMapNumber,
   normalizeChanges,
@@ -22,6 +21,7 @@ import {
   normalizeConditionName,
   parseConditions,
   snapshotForViewer,
+  ValidationError,
 } from "./domain.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -57,12 +57,8 @@ function serializeError(error) {
 // Socket.IO with the configured origin allowlist, and register every realtime
 // event handler. Returns { app, io, close } for the entry point to manage.
 export function createApplication({
-  httpServer,
-  database,
-  dmPassword,
-  allowedOrigins,
-  trustProxy = false,
-}) {
+                                    httpServer, database, dmPassword, allowedOrigins, trustProxy = false,
+                                  }) {
   if (!dmPassword) {
     throw new Error("DM_PASSWORD must be set before the server starts.");
   }
@@ -71,19 +67,12 @@ export function createApplication({
   httpServer.on("request", app);
   const acceptedOrigins = new Set(allowedOrigins || []);
   const io = new Server(httpServer, {
-    serveClient: false,
-    cors: allowedOrigins?.length
-      ? {
-          origin: allowedOrigins,
-          methods: ["GET", "POST"],
-        }
-      : undefined,
-    allowRequest: acceptedOrigins.size
-      ? (request, callback) => {
-          const origin = request.headers.origin;
-          callback(null, !origin || acceptedOrigins.has(origin));
-        }
-      : undefined,
+    serveClient: false, cors: allowedOrigins?.length ? {
+      origin: allowedOrigins, methods: ["GET", "POST"],
+    } : undefined, allowRequest: acceptedOrigins.size ? (request, callback) => {
+      const origin = request.headers.origin;
+      callback(null, !origin || acceptedOrigins.has(origin));
+    } : undefined,
   });
   // Live DM sessions: token -> last-seen timestamp. In-memory only, so all DM
   // sessions vanish on restart; combat data (in SQLite) survives.
@@ -94,7 +83,7 @@ export function createApplication({
   app.use(express.json());
   // Lightweight liveness probe used by the dev launcher and container health check.
   app.get("/api/health", (_request, response) => {
-    response.json({ ok: true, revision: database.snapshot().revision });
+    response.json({ok: true, revision: database.snapshot().revision});
   });
 
   // In production the built client is served from the same origin; the catch-all
@@ -123,11 +112,9 @@ export function createApplication({
 
   // Current value of the persisted player-editing lock flag.
   function playerEditingLocked() {
-    return Boolean(
-      database.raw
-        .prepare("SELECT player_locked FROM tracker_meta WHERE singleton = 1")
-        .get().player_locked,
-    );
+    return Boolean(database.raw
+      .prepare("SELECT player_locked FROM tracker_meta WHERE singleton = 1")
+      .get().player_locked,);
   }
 
   // Guard for player-originated mutations: throw when a non-DM tries to edit
@@ -162,7 +149,7 @@ export function createApplication({
   io.on("connection", (socket) => {
     resumeDmSession(socket, socket.handshake.auth?.dmToken);
     socket.emit("state:snapshot", snapshotForViewer(database.snapshot(), isDm(socket)));
-    socket.emit("dm:status", { isDm: isDm(socket) });
+    socket.emit("dm:status", {isDm: isDm(socket)});
 
     // Client asks for the current state (e.g. right after (re)connecting).
     // TODO: every caller (emitCommand, and test/server.test.js's command())
@@ -174,9 +161,7 @@ export function createApplication({
     // acknowledge) like every other handler below.
     socket.on("state:request", (acknowledge) => {
       respond(acknowledge, {
-        ok: true,
-        snapshot: snapshotForViewer(database.snapshot(), isDm(socket)),
-        isDm: isDm(socket),
+        ok: true, snapshot: snapshotForViewer(database.snapshot(), isDm(socket)), isDm: isDm(socket),
       });
     });
 
@@ -184,7 +169,7 @@ export function createApplication({
     // re-entering the password. Fails cleanly if the token has expired.
     socket.on("dm:resume", (payload, acknowledge) => {
       const resumed = resumeDmSession(socket, payload?.token);
-      socket.emit("dm:status", { isDm: resumed });
+      socket.emit("dm:status", {isDm: resumed});
       socket.emit("state:snapshot", snapshotForViewer(database.snapshot(), resumed));
       respond(acknowledge, {
         ok: resumed,
@@ -198,25 +183,25 @@ export function createApplication({
     // immediately receives an unredacted snapshot.
     socket.on("dm:login", (payload, acknowledge) => {
       if (!safePasswordMatch(payload?.password, dmPassword)) {
-        respond(acknowledge, { ok: false, error: "Incorrect DM password." });
+        respond(acknowledge, {ok: false, error: "Incorrect DM password."});
         return;
       }
 
       const token = crypto.randomBytes(32).toString("base64url");
       dmSessions.set(token, Date.now());
       socket.data.dmToken = token;
-      socket.emit("dm:status", { isDm: true });
+      socket.emit("dm:status", {isDm: true});
       socket.emit("state:snapshot", database.snapshot());
-      respond(acknowledge, { ok: true, token });
+      respond(acknowledge, {ok: true, token});
     });
 
     // Drop DM privileges: invalidate the token and re-send a redacted snapshot.
     socket.on("dm:logout", (_payload, acknowledge) => {
       if (socket.data.dmToken) dmSessions.delete(socket.data.dmToken);
       socket.data.dmToken = null;
-      socket.emit("dm:status", { isDm: false });
+      socket.emit("dm:status", {isDm: false});
       socket.emit("state:snapshot", snapshotForViewer(database.snapshot(), false));
-      respond(acknowledge, { ok: true });
+      respond(acknowledge, {ok: true});
     });
 
     // Add a combatant. Entries added by a non-DM are player-controlled;
@@ -235,24 +220,12 @@ export function createApplication({
               hp_current, hp_max, player_controlled, map_number,
               ac_visible, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(
-            id,
-            combatant.name,
-            combatant.initiativeRoll,
-            combatant.initiativeModifier,
-            combatant.ac,
-            combatant.hpCurrent,
-            combatant.hpMax,
-            Number(playerControlled),
-            mapNumber,
-            0,
-            new Date().toISOString(),
-          );
+          `).run(id, combatant.name, combatant.initiativeRoll, combatant.initiativeModifier, combatant.ac, combatant.hpCurrent, combatant.hpMax, Number(playerControlled), mapNumber, 0, new Date().toISOString(),);
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, id, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, id, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -294,9 +267,9 @@ export function createApplication({
           }
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -321,11 +294,7 @@ export function createApplication({
           throw new ValidationError("Only the DM can edit this combatant.");
         }
 
-        const nextConditions = applyConditionToggle(
-          parseConditions(existing.conditions),
-          condition,
-          payload.active,
-        );
+        const nextConditions = applyConditionToggle(parseConditions(existing.conditions), condition, payload.active,);
         const snapshot = database.commit((db) => {
           const result = db
             .prepare("UPDATE combatants SET conditions = ? WHERE id = ?")
@@ -335,9 +304,9 @@ export function createApplication({
           }
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -364,9 +333,9 @@ export function createApplication({
           }
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -391,9 +360,9 @@ export function createApplication({
           }
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -412,9 +381,9 @@ export function createApplication({
           `).run(Number(payload.visible));
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -434,9 +403,9 @@ export function createApplication({
           `).run(Number(payload.locked));
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -452,9 +421,9 @@ export function createApplication({
           }
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
 
@@ -466,17 +435,15 @@ export function createApplication({
           db.prepare("DELETE FROM combatants").run();
         });
         sendSnapshot(snapshot);
-        respond(acknowledge, { ok: true, revision: snapshot.revision });
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
       } catch (error) {
-        respond(acknowledge, { ok: false, error: serializeError(error) });
+        respond(acknowledge, {ok: false, error: serializeError(error)});
       }
     });
   });
 
   return {
-    app,
-    io,
-    async close() {
+    app, io, async close() {
       dmSessions.clear();
       await io.close();
     },

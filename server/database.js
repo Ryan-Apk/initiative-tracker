@@ -208,7 +208,7 @@ export function createDatabase(databasePath) {
           }
         }
       }
-      console.log("Added lines for " + folderName + "\\"+ file);
+      console.log("Added lines for " + folderName + "\\" + file);
       // update the metadata
       const countStatement = database.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
       const countResults = countStatement.get();

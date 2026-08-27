@@ -14,8 +14,8 @@ import {
   snapshotForViewer,
   sortCombatants,
 } from "../server/domain.js";
-import { healthTone as clientHealthTone } from "../src/health.js";
-import { ALL_CONDITIONS as clientAllConditions } from "../src/conditions.js";
+import { healthTone as clientHealthTone } from "../src/helpers/health.js";
+import { ALL_CONDITIONS as clientAllConditions } from "../src/helpers/conditions.js";
 
 test("sortCombatants applies every server tie-break in order", () => {
   const combatants = [
