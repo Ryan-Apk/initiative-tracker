@@ -10,13 +10,31 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import lineReader from 'line-reader';
 import {healthTone, initiativeTotal, parseConditions, sortCombatants,} from "./domain.js";
 import {fileURLToPath} from "node:url";
 
 // Bumped whenever a data transform (not just an additive column) is needed;
 // migrateDatabase runs the transform once and records the new version.
 const CURRENT_SCHEMA_VERSION = 3;
+
+// Decode a text file, sniffing its BOM (UTF-8 or UTF-16) when present rather
+// than assuming UTF-8 outright — roller-table .txt files are hand-authored
+// and commonly saved by Notepad, which defaults to UTF-16 LE on "Unicode".
+function readTextFile(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) {
+    return buffer.subarray(3).toString("utf8");
+  }
+  if (buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return buffer.subarray(2).toString("utf16le");
+  }
+  if (buffer[0] === 0xfe && buffer[1] === 0xff) {
+    const swapped = Buffer.from(buffer.subarray(2));
+    swapped.swap16();
+    return swapped.toString("utf16le");
+  }
+  return buffer.toString("utf8");
+}
 
 // Whether a table already has a given column, used to make migrations idempotent.
 function hasColumn(database, table, column) {
@@ -118,11 +136,22 @@ export function createDatabase(databasePath) {
     );
     
     CREATE TABLE IF NOT EXISTS rollerTableMetadata(
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     tableName TEXT NOT NULL,
     entryCount INTEGER NOT NULL,
-    tableDescription TEXT
+    tableDescription TEXT,
+    createdatetime  TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S:%s', 'now', 'localtime') ),
+    updatedatetime  TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S:%s', 'now', 'localtime') ) 
     );
+    
+    CREATE TRIGGER IF NOT EXISTS update_entryCount_updatetime
+            BEFORE UPDATE
+                ON rollerTableMetadata
+    BEGIN
+        UPDATE rollerTableMetadata
+           SET updatedatetime = strftime('%Y-%m-%d %H:%M:%S:%s', 'now', 'localtime') 
+         WHERE id = old.id;
+    END;
   `);
 
   migrateDatabase(database);
@@ -166,11 +195,11 @@ export function createDatabase(databasePath) {
       console.log("Will not add lines for " + file + " as there are: " + countResults.count);
       continue;
     }
-    console.log(`Count: ${countResults.count}`);
     // TRY open the corresponding file
     try {
       const insertRow = database.prepare(`INSERT INTO ${tableName} (description) VALUES (?)`);
-      lineReader.eachLine(folderName + '\\' + file, (line) => {
+      const lines = readTextFile(path.join(folderName, file)).split(/\r\n?|\n/);
+      for (const line of lines) {
         if (line) {
           try {
             insertRow.run(line);
@@ -178,9 +207,14 @@ export function createDatabase(databasePath) {
             console.log("Error with line: " + line + " in " + tableName);
           }
         }
-      });
-      console.log("Added lines for " + folderName + file);
-    }catch{
+      }
+      console.log("Added lines for " + folderName + "\\"+ file);
+      // update the metadata
+      const countStatement = database.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
+      const countResults = countStatement.get();
+      const metaInsertRow = database.prepare(`INSERT INTO rollerTableMetadata (tableName, entryCount) VALUES (?,?)`);
+      metaInsertRow.run(tableName, countResults.count);
+    } catch {
       throw "Error with trying to open file: " + folderName + file;
     }
     // CATCH throw an error and stop the program
