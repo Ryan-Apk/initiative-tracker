@@ -10,16 +10,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import {
-  healthTone,
-  initiativeTotal,
-  parseConditions,
-  sortCombatants,
-} from "./domain.js";
+import lineReader from 'line-reader';
+import {healthTone, initiativeTotal, parseConditions, sortCombatants,} from "./domain.js";
+import {fileURLToPath} from "node:url";
 
 // Bumped whenever a data transform (not just an additive column) is needed;
 // migrateDatabase runs the transform once and records the new version.
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 // Whether a table already has a given column, used to make migrations idempotent.
 function hasColumn(database, table, column) {
@@ -34,28 +31,22 @@ function hasColumn(database, table, column) {
 // (split modifier out of the stored roll, assign initial enemy map numbers).
 function migrateDatabase(database) {
   if (!hasColumn(database, "tracker_meta", "schema_version")) {
-    database.exec(
-      "ALTER TABLE tracker_meta ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1",
-    );
+    database.exec("ALTER TABLE tracker_meta ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1",);
   }
   if (!hasColumn(database, "tracker_meta", "player_locked")) {
-    database.exec(
-      "ALTER TABLE tracker_meta ADD COLUMN player_locked INTEGER NOT NULL DEFAULT 0 CHECK (player_locked IN (0, 1))",
-    );
+    database.exec("ALTER TABLE tracker_meta ADD COLUMN player_locked INTEGER NOT NULL DEFAULT 0 CHECK (player_locked IN (0, 1))",);
   }
   if (!hasColumn(database, "combatants", "map_number")) {
     database.exec("ALTER TABLE combatants ADD COLUMN map_number INTEGER");
   }
   if (!hasColumn(database, "combatants", "ac_visible")) {
-    database.exec(
-      "ALTER TABLE combatants ADD COLUMN ac_visible INTEGER NOT NULL DEFAULT 0 CHECK (ac_visible IN (0, 1))",
-    );
+    database.exec("ALTER TABLE combatants ADD COLUMN ac_visible INTEGER NOT NULL DEFAULT 0 CHECK (ac_visible IN (0, 1))",);
   }
   if (!hasColumn(database, "combatants", "conditions")) {
-    database.exec(
-      "ALTER TABLE combatants ADD COLUMN conditions TEXT NOT NULL DEFAULT '[]'",
-    );
+    database.exec("ALTER TABLE combatants ADD COLUMN conditions TEXT NOT NULL DEFAULT '[]'",);
   }
+
+  // TODO write the reconciliation for the roller table metadata (it should update count etc.)
 
   const currentVersion = database
     .prepare("SELECT schema_version FROM tracker_meta WHERE singleton = 1")
@@ -78,9 +69,7 @@ function migrateDatabase(database) {
         ORDER BY created_at ASC, id ASC
       `)
       .all();
-    const assignMapNumber = database.prepare(
-      "UPDATE combatants SET map_number = ? WHERE id = ?",
-    );
+    const assignMapNumber = database.prepare("UPDATE combatants SET map_number = ? WHERE id = ?",);
     existingEnemies.forEach((combatant, index) => {
       assignMapNumber.run(index + 1, combatant.id);
     });
@@ -97,7 +86,7 @@ function migrateDatabase(database) {
 // once here and reused for the lifetime of the process.
 export function createDatabase(databasePath) {
   const resolvedPath = path.resolve(databasePath);
-  fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+  fs.mkdirSync(path.dirname(resolvedPath), {recursive: true});
 
   const database = new Database(resolvedPath);
   // WAL improves read/write concurrency; the single writer is this process.
@@ -127,9 +116,77 @@ export function createDatabase(databasePath) {
       conditions TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+    
+    CREATE TABLE IF NOT EXISTS rollerTableMetadata(
+    id INTEGER PRIMARY KEY,
+    tableName TEXT NOT NULL,
+    entryCount INTEGER NOT NULL,
+    tableDescription TEXT
+    );
   `);
 
   migrateDatabase(database);
+
+  // name of all the tables in the data folder, this is where all tables will be added and scanned on launch
+  // TODO make this not a hardcoded path
+  const folderName = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+  try {
+    if (!fs.existsSync(folderName)) {
+      console.log("created directory for data")
+      fs.mkdirSync(folderName);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  let dataFiles = [];
+  fs.readdirSync(folderName).forEach(file => {
+    if (!file.toLowerCase().endsWith('.txt')) return;
+    console.log("File found for table roller data: " + file);
+    // strip the extension, then sanitize to characters valid in an unquoted insert statement;
+    // a leading digit is otherwise unusable as a bare identifier, so prefix rather than strip it
+    let tableName = file
+      .replace(/\.txt$/i, '')
+      .replace(/[^a-z0-9_]+/gi, '_')
+      .toLowerCase()
+      .replace(/^(?=[0-9])/, '_');
+    dataFiles.push({file, tableName});
+  })
+
+
+  for (const {file, tableName} of dataFiles) {
+    // check if the table exists
+    database.exec(`CREATE TABLE IF NOT EXISTS ${tableName}
+        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        description TEXT NOT NULL)`);
+    // check if there are not items in the entry
+    const countStatement = database.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
+    const countResults = countStatement.get();
+    if (countResults.count > 0) {
+      console.log("Will not add lines for " + file + " as there are: " + countResults.count);
+      continue;
+    }
+    console.log(`Count: ${countResults.count}`);
+    // TRY open the corresponding file
+    try {
+      const insertRow = database.prepare(`INSERT INTO ${tableName} (description) VALUES (?)`);
+      lineReader.eachLine(folderName + '\\' + file, (line) => {
+        if (line) {
+          try {
+            insertRow.run(line);
+          } catch {
+            console.log("Error with line: " + line + " in " + tableName);
+          }
+        }
+      });
+      console.log("Added lines for " + folderName + file);
+    }catch{
+      throw "Error with trying to open file: " + folderName + file;
+    }
+    // CATCH throw an error and stop the program
+    // update the table metadata
+  }
+
   // Enforce that map numbers are unique among the combatants that have one
   // (enemies); NULLs (player-controlled entries) are exempt via the WHERE.
   database.exec(`
@@ -138,9 +195,7 @@ export function createDatabase(databasePath) {
     WHERE map_number IS NOT NULL
   `);
 
-  const readMeta = database.prepare(
-    "SELECT revision, player_locked AS playerLocked FROM tracker_meta WHERE singleton = 1",
-  );
+  const readMeta = database.prepare("SELECT revision, player_locked AS playerLocked FROM tracker_meta WHERE singleton = 1",);
   const readCombatants = database.prepare(`
     SELECT
       id,
@@ -156,9 +211,7 @@ export function createDatabase(databasePath) {
       conditions
     FROM combatants
   `);
-  const incrementRevision = database.prepare(
-    "UPDATE tracker_meta SET revision = revision + 1 WHERE singleton = 1",
-  );
+  const incrementRevision = database.prepare("UPDATE tracker_meta SET revision = revision + 1 WHERE singleton = 1",);
 
   // Build the complete canonical state: metadata plus every combatant, with
   // SQLite integers coerced to booleans, conditions parsed, derived values
@@ -174,15 +227,11 @@ export function createDatabase(databasePath) {
         conditions: parseConditions(row.conditions),
       };
       return {
-        ...combatant,
-        initiativeTotal: initiativeTotal(combatant),
-        healthTone: healthTone(combatant),
+        ...combatant, initiativeTotal: initiativeTotal(combatant), healthTone: healthTone(combatant),
       };
     });
     return {
-      revision: meta.revision,
-      playerLocked: Boolean(meta.playerLocked),
-      combatants: sortCombatants(combatants),
+      revision: meta.revision, playerLocked: Boolean(meta.playerLocked), combatants: sortCombatants(combatants),
     };
   }
 
@@ -198,9 +247,6 @@ export function createDatabase(databasePath) {
   }
 
   return {
-    raw: database,
-    snapshot,
-    commit,
-    close: () => database.close(),
+    raw: database, snapshot, commit, close: () => database.close(),
   };
 }
