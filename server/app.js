@@ -152,14 +152,7 @@ export function createApplication({
     socket.emit("dm:status", {isDm: isDm(socket)});
 
     // Client asks for the current state (e.g. right after (re)connecting).
-    // TODO: every caller (emitCommand, and test/server.test.js's command())
-    // always sends a payload arg, so this handler actually receives that
-    // payload as `acknowledge` and the real ack fn as an unused 2nd param —
-    // the response never reaches the caller. Client-side impact is masked
-    // because the server also pushes "state:snapshot" independently on
-    // connect, but this handler itself is dead: fix by taking (_payload,
-    // acknowledge) like every other handler below.
-    socket.on("state:request", (acknowledge) => {
+    socket.on("state:request", (_payload, acknowledge) => {
       respond(acknowledge, {
         ok: true, snapshot: snapshotForViewer(database.snapshot(), isDm(socket)), isDm: isDm(socket),
       });

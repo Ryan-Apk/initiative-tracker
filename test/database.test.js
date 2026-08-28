@@ -6,15 +6,20 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { createDatabase } from "../server/database.js";
 
-function temporaryDatabasePath(context) {
+// Returns the directory separately (rather than registering its own cleanup)
+// so callers can register database.close() before the directory removal —
+// node:test runs after() hooks in registration order, and on Windows
+// removing a SQLite file while its handle is still open fails with EBUSY.
+function temporaryDatabasePath() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "initiative-db-test-"));
-  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  return path.join(directory, "tracker.sqlite");
+  return { directory, databasePath: path.join(directory, "tracker.sqlite") };
 }
 
 test("fresh databases store base rolls and persistent tracker state", (context) => {
-  const database = createDatabase(temporaryDatabasePath(context));
+  const { directory, databasePath } = temporaryDatabasePath();
+  const database = createDatabase(databasePath);
   context.after(() => database.close());
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
 
   database.commit((db) => {
     db.prepare(`
@@ -39,7 +44,7 @@ test("fresh databases store base rolls and persistent tracker state", (context) 
 });
 
 test("legacy migration preserves totals and assigns enemy map numbers once", (context) => {
-  const databasePath = temporaryDatabasePath(context);
+  const { directory, databasePath } = temporaryDatabasePath();
   const legacy = new Database(databasePath);
   legacy.exec(`
     CREATE TABLE tracker_meta (
@@ -87,6 +92,7 @@ test("legacy migration preserves totals and assigns enemy map numbers once", (co
 
   const reopened = createDatabase(databasePath);
   context.after(() => reopened.close());
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const reopenedEnemyA = reopened
     .snapshot()
     .combatants.find(({ id }) => id === "enemy-a");

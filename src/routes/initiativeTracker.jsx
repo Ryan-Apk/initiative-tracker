@@ -11,9 +11,11 @@
 
 // Blank state for the "add combatant" form (modifier defaults to 0).
 import {useEffect, useMemo, useRef, useState} from "react";
-import {emitCommand, getStoredDmToken, socket, storeDmToken,} from "../helpers/socket.js";
+import {commands, useLiveTracker,} from "../helpers/socket.js";
 import {healthLabels, healthTone, publicHealthLabels,} from "../helpers/health.js";
 import {ALL_CONDITIONS} from "../helpers/conditions.js";
+import DmAccess from "../helpers/dmAccess.jsx";
+import ConnectionStatus from "../helpers/connectionStatus.jsx";
 
 
 const EMPTY_FORM = {
@@ -78,9 +80,7 @@ function EditableField({
       onCommit({ok: false, error: `${FIELD_LABELS[field]} is required.`});
       return;
     }
-    const result = await emitCommand("combatant:update", {
-      id: combatant.id, changes: {[field]: draft},
-    });
+    const result = await commands.updateCombatant(combatant.id, {[field]: draft});
     if (!result.ok) reset();
     onCommit(result);
   }
@@ -160,9 +160,7 @@ function InitiativeControls({
       onCommit({ok: false, error: `${FIELD_LABELS[field]} is required.`});
       return;
     }
-    const result = await emitCommand("combatant:update", {
-      id: combatant.id, changes: {[field]: draft},
-    });
+    const result = await commands.updateCombatant(combatant.id, {[field]: draft});
     if (!result.ok) reset(serverValue);
     onCommit(result);
   }
@@ -349,9 +347,7 @@ function ConditionsControl({combatant, canEdit, connected, onResult}) {
   // Flip one condition on/off from the dropdown (server decides the new order).
   async function toggleCondition(condition) {
     const active = !conditions.includes(condition);
-    onResult(await emitCommand("combatant:set-condition", {
-      id: combatant.id, condition, active,
-    }),);
+    onResult(await commands.setCombatantCondition(combatant.id, condition, active));
   }
 
   // Nothing to show or do for a read-only viewer with no conditions.
@@ -434,22 +430,18 @@ function CombatantRow({
 
   // DM-only: flip an entry between enemy and player-controlled.
   async function toggleControl() {
-    onResult(await emitCommand("combatant:set-player-controlled", {
-      id: combatant.id, playerControlled: !combatant.playerControlled,
-    }),);
+    onResult(await commands.setCombatantControl(combatant.id, !combatant.playerControlled));
   }
 
   // DM-only: remove this combatant, after a confirm prompt.
   async function remove() {
     if (!window.confirm(`Remove ${combatant.name} from initiative?`)) return;
-    onResult(await emitCommand("combatant:remove", {id: combatant.id}));
+    onResult(await commands.removeCombatant(combatant.id));
   }
 
   // DM-only: show/hide this enemy's AC to players.
   async function toggleAcVisibility() {
-    onResult(await emitCommand("combatant:set-ac-visible", {
-      id: combatant.id, visible: !combatant.acVisible,
-    }),);
+    onResult(await commands.setCombatantAcVisible(combatant.id, !combatant.acVisible));
   }
 
   return (<article
@@ -584,7 +576,7 @@ function AddCombatant({connected, isDm, onResult, playerLocked}) {
     event.preventDefault();
     if (disabled) return;
     setSubmitting(true);
-    const result = await emitCommand("combatant:add", form);
+    const result = await commands.addCombatant(form);
     setSubmitting(false);
     onResult(result);
     if (result.ok) setForm(EMPTY_FORM);
@@ -645,145 +637,15 @@ function AddCombatant({connected, isDm, onResult, playerLocked}) {
   </form>);
 }
 
-// Header DM login/logout control. When not a DM it reveals a password popover;
-// when a DM it offers "Leave DM mode". On success it persists/clears the token
-// (via socket.js) so the DM session survives reloads until the token is dropped.
-function DmAccess({connected, isDm, onResult, onStatusChange}) {
-  const [password, setPassword] = useState("");
-  const [open, setOpen] = useState(false);
-
-  // Attempt DM login; on success store the returned token and close the popover.
-  async function login(event) {
-    event.preventDefault();
-    const result = await emitCommand("dm:login", {password});
-    if (result.ok) {
-      storeDmToken(result.token);
-      setPassword("");
-      setOpen(false);
-      onStatusChange(true);
-    }
-    onResult(result);
-  }
-
-  // Leave DM mode and forget the stored token.
-  async function logout() {
-    const result = await emitCommand("dm:logout");
-    if (result.ok) {
-      storeDmToken(null);
-      onStatusChange(false);
-    }
-    onResult(result);
-  }
-
-  if (isDm) {
-    return (<button
-      className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-stone-700 hover:border-stone-500 disabled:opacity-50"
-      disabled={!connected}
-      onClick={logout}
-      type="button"
-    >
-      Leave DM mode
-    </button>);
-  }
-
-  return (<div className="relative">
-    <button
-      className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-stone-700 hover:border-stone-500 disabled:opacity-50"
-      disabled={!connected}
-      onClick={() => setOpen((current) => !current)}
-      type="button"
-    >
-      DM access
-    </button>
-    {open && (<form
-      className="absolute right-0 top-12 z-20 grid w-72 gap-3 rounded-xl border border-stone-300 bg-white p-4 shadow-panel"
-      onSubmit={login}
-    >
-      <label className="grid gap-1 text-xs font-bold uppercase tracking-wide text-stone-600">
-        DM password
-        <input
-          autoFocus
-          className="rounded-lg border border-stone-300 px-3 py-2 text-base font-normal outline-none focus:border-ember focus:ring-2 focus:ring-orange-100"
-          onChange={(event) => setPassword(event.target.value)}
-          required
-          type="password"
-          value={password}
-        />
-      </label>
-      <button className="rounded-lg bg-ink px-4 py-2 font-bold text-white" type="submit">
-        Enter DM mode
-      </button>
-    </form>)}
-  </div>);
-}
-
-// The tracker's single source of client state. It owns the socket lifecycle,
+// Th e tracker's single source of client state. It owns the socket lifecycle,
 // the latest server snapshot, DM status, and transient error notices, and
 // composes the header, add form, and combat list. All child components send
 // commands and read from the snapshot this holds. Rendered at /init.
 export default function InitiativeTracker() {
-  const [connected, setConnected] = useState(socket.connected);
-  // Bumped on every (re)connect; used as part of row keys to remount editable
-  // fields so their local drafts are discarded in favour of the fresh snapshot.
-  const [connectionGeneration, setConnectionGeneration] = useState(0);
-  const [isDm, setIsDm] = useState(false);
-  const [snapshot, setSnapshot] = useState({
-    revision: 0, playerLocked: false, combatants: [],
-  });
   const [notice, setNotice] = useState(null);
-
-  // Subscribe to the socket for the component's lifetime: on connect, try to
-  // resume a DM session and pull fresh state; keep connection/DM/snapshot state
-  // in sync with server events. Cleanup removes every listener.
-  useEffect(() => {
-    function handleConnect() {
-      setConnected(true);
-      setConnectionGeneration((current) => current + 1);
-      const token = getStoredDmToken();
-      if (token) {
-        emitCommand("dm:resume", {token}).then((result) => {
-          if (!result.ok) {
-            storeDmToken(null);
-            setIsDm(false);
-            setNotice({type: "error", text: result.error});
-          }
-        });
-      }
-      emitCommand("state:request").then((result) => {
-        if (result.ok) {
-          setSnapshot(result.snapshot);
-          setIsDm(result.isDm);
-        }
-      });
-    }
-
-    function handleDisconnect() {
-      setConnected(false);
-    }
-
-    // Accept a snapshot only if it is at least as new as what we hold, so a
-    // late/out-of-order delivery can't roll the view back to a stale revision.
-    function handleSnapshot(nextSnapshot) {
-      setSnapshot((current) => nextSnapshot.revision >= current.revision ? nextSnapshot : current,);
-    }
-
-    function handleDmStatus(status) {
-      setIsDm(Boolean(status.isDm));
-    }
-
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("state:snapshot", handleSnapshot);
-    socket.on("dm:status", handleDmStatus);
-    if (socket.connected) handleConnect();
-
-    return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("state:snapshot", handleSnapshot);
-      socket.off("dm:status", handleDmStatus);
-    };
-  }, []);
+  const {connected, connectionGeneration, isDm, setIsDm, snapshot} = useLiveTracker({
+    onResumeError: (error) => setNotice({type: "error", text: error}),
+  });
 
   // Auto-dismiss an error notice after 5s.
   useEffect(() => {
@@ -812,38 +674,24 @@ export default function InitiativeTracker() {
   // DM-only: wipe the tracker after confirmation.
   async function clearCombat() {
     if (!window.confirm("Clear every combatant from this initiative tracker?")) return;
-    handleResult(await emitCommand("combat:clear"));
+    handleResult(await commands.clearCombat());
   }
 
   // DM-only: toggle the persistent player-editing lock.
   async function togglePlayerLock() {
-    handleResult(await emitCommand("tracker:set-player-locked", {
-      locked: !snapshot.playerLocked,
-    }),);
+    handleResult(await commands.setPlayerLocked(!snapshot.playerLocked));
   }
 
   // DM-only: reveal or hide AC for every enemy at once.
   async function setAllEnemyAc(visible) {
-    handleResult(await emitCommand("combatants:set-enemy-ac-visible", {visible}),);
+    handleResult(await commands.setAllEnemyAcVisible(visible));
   }
 
   return (<div className="min-h-screen bg-parchment text-ink">
     <header className="border-b border-stone-300 bg-white/80 backdrop-blur">
       <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-4 px-5 py-5">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-ember">
-            Rivergate table tools
-          </p>
-          <h1 className="font-display text-4xl">Initiative Tracker</h1>
-        </div>
         <div className="flex flex-wrap items-center gap-3">
-            <span
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold uppercase tracking-wide ${connected ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-red-300 bg-red-50 text-red-800"}`}
-              role="status"
-            >
-              <span className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-500" : "bg-red-500"}`}/>
-              {connected ? "Live" : "Reconnecting"}
-            </span>
+          <ConnectionStatus connected={connected}/>
           <span className="text-xs text-stone-500">
               Revision {snapshot.revision} · {counts.total} entries
             </span>
