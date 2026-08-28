@@ -27,6 +27,9 @@ import {
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.resolve(moduleDirectory, "../dist");
 
+// Minimum gap between accepted rolls from the same socket.
+const ROLL_RATE_LIMIT_MS = 1000;
+
 // Constant-time password comparison. Bails on length mismatch first (that leaks
 // only length), then uses timingSafeEqual so a match cannot be timed byte by byte.
 function safePasswordMatch(candidate, expected) {
@@ -144,6 +147,15 @@ export function createApplication({
     return snapshot;
   }
 
+  // Push the latest roll history to every currently-connected DM socket only
+  // (it carries full description text). Called after any roll is recorded so
+  // a DM's history list stays live regardless of who rolled.
+  function sendRollHistory(history = database.listRollHistory()) {
+    for (const client of io.sockets.sockets.values()) {
+      if (isDm(client)) client.emit("tables:history", history);
+    }
+  }
+
   // Per-connection wiring: resume any DM session presented at handshake, push an
   // initial snapshot + DM status, then register all command handlers below.
   io.on("connection", (socket) => {
@@ -156,6 +168,59 @@ export function createApplication({
       respond(acknowledge, {
         ok: true, snapshot: snapshotForViewer(database.snapshot(), isDm(socket)), isDm: isDm(socket),
       });
+    });
+
+    // List every roller table (server/data/*.txt, tracked in
+    // rollerTableMetadata) so a client can populate a table picker.
+    socket.on("tables:list", (_payload, acknowledge) => {
+      try {
+        respond(acknowledge, {ok: true, tables: database.listRollerTables()});
+      } catch (error) {
+        respond(acknowledge, {ok: false, error: serializeError(error)});
+      }
+    });
+
+    // Roll a random entry (1..entryCount) on one roller table. Non-DM
+    // viewers get back only the roll number; the DM also gets the rolled
+    // row's text, same redaction shape as the tracker's enemy stats. Every
+    // roll (from anyone) is recorded and pushed to DM sockets as history.
+    // Rate-limited per socket so a rejected/invalid attempt doesn't burn
+    // the cooldown — only a successful roll does.
+    socket.on("tables:roll", (payload, acknowledge) => {
+      try {
+        const sinceLastRoll = Date.now() - (socket.data.lastRollAt ?? 0);
+        if (sinceLastRoll < ROLL_RATE_LIMIT_MS) {
+          throw new ValidationError("You're rolling too fast — wait a second and try again.");
+        }
+        if (typeof payload?.tableName !== "string") {
+          throw new ValidationError("A table must be selected.");
+        }
+        const result = database.rollOnTable(payload.tableName);
+        socket.data.lastRollAt = Date.now();
+        database.recordRoll(result);
+        sendRollHistory();
+        respond(acknowledge, {
+          ok: true,
+          tableName: result.tableName,
+          roll: result.roll,
+          count: result.count,
+          description: isDm(socket) ? result.description : undefined,
+        });
+      } catch (error) {
+        respond(acknowledge, {ok: false, error: serializeError(error)});
+      }
+    });
+
+    // DM-only: pull the current roll history (e.g. right after navigating to
+    // the rollers page, or logging in after rolls already happened).
+    // Thereafter it stays live via the tables:history push above.
+    socket.on("tables:history", (_payload, acknowledge) => {
+      try {
+        if (!isDm(socket)) throw new ValidationError("Only the DM can view roll history.");
+        respond(acknowledge, {ok: true, history: database.listRollHistory()});
+      } catch (error) {
+        respond(acknowledge, {ok: false, error: serializeError(error)});
+      }
     });
 
     // Re-establish DM privileges from a stored token after a reconnect, without

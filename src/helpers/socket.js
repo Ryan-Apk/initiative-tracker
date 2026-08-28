@@ -113,6 +113,9 @@ export const commands = {
   setPlayerLocked: (locked) => emitCommand("tracker:set-player-locked", { locked }),
   clearCombat: () => emitCommand("combat:clear"),
   requestState: () => emitCommand("state:request"),
+  listTables: () => emitCommand("tables:list"),
+  rollOnTable: (tableName) => emitCommand("tables:roll", { tableName }),
+  rollHistory: () => emitCommand("tables:history"),
   resumeDm: (token) => emitCommand("dm:resume", { token }),
   loginDm: (password) => emitCommand("dm:login", { password }),
   logoutDm: () => emitCommand("dm:logout"),
@@ -141,6 +144,26 @@ export function useSocketEvent(event, initialValue, reduce = (next) => next) {
   }, [event]);
 
   return [value, setValue];
+}
+
+// Live DM status for pages that don't need the full tracker snapshot (e.g.
+// the rollers page). Stays in sync with dm:status pushes, and also pulls the
+// current value on (re)connect via state:request — otherwise a page mounted
+// after DM status was already established elsewhere (same shared socket)
+// wouldn't see it until the next unrelated push. Returns a [isDm, setIsDm]
+// pair, so a caller can pass the setter straight to <DmAccess onStatusChange>.
+export function useDmStatus() {
+  const connected = useConnected();
+  const [isDm, setIsDm] = useSocketEvent("dm:status", false, (status) => Boolean(status.isDm));
+
+  useEffect(() => {
+    if (!connected) return;
+    commands.requestState().then((result) => {
+      if (result.ok) setIsDm(result.isDm);
+    });
+  }, [connected]);
+
+  return [isDm, setIsDm];
 }
 
 const INITIAL_SNAPSHOT = { revision: 0, playerLocked: false, combatants: [] };

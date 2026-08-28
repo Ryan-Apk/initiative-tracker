@@ -7,10 +7,11 @@
  * State is intentionally single-file and single-server; see README security
  * notes. better-sqlite3 is synchronous, so these calls block by design.
  */
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import {healthTone, initiativeTotal, parseConditions, sortCombatants,} from "./domain.js";
+import {ValidationError, healthTone, initiativeTotal, parseConditions, sortCombatants,} from "./domain.js";
 import {fileURLToPath} from "node:url";
 
 // Bumped whenever a data transform (not just an additive column) is needed;
@@ -149,9 +150,18 @@ export function createDatabase(databasePath) {
                 ON rollerTableMetadata
     BEGIN
         UPDATE rollerTableMetadata
-           SET updatedatetime = strftime('%Y-%m-%d %H:%M:%S:%s', 'now', 'localtime') 
+           SET updatedatetime = strftime('%Y-%m-%d %H:%M:%S:%s', 'now', 'localtime')
          WHERE id = old.id;
     END;
+
+    CREATE TABLE IF NOT EXISTS rollHistory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tableName TEXT NOT NULL,
+      roll INTEGER NOT NULL,
+      count INTEGER NOT NULL,
+      description TEXT,
+      rolledAt TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%S:%s', 'now', 'localtime') )
+    );
   `);
 
   migrateDatabase(database);
@@ -280,7 +290,61 @@ export function createDatabase(databasePath) {
     })();
   }
 
+  // Every roller table the startup scan above found, with a live row count.
+  // rollerTableMetadata's own entryCount column can go stale if a .txt file
+  // grows after its first import (see the migrateDatabase TODO), so this
+  // recomputes the count fresh rather than trusting the stored value.
+  function listRollerTables() {
+    const tables = database
+      .prepare("SELECT tableName, tableDescription FROM rollerTableMetadata ORDER BY tableName")
+      .all();
+    return tables.map(({tableName, tableDescription}) => ({
+      tableName,
+      tableDescription,
+      entryCount: database.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get().count,
+    }));
+  }
+
+  // Roll a cryptographically random entry (1..count) from one roller table.
+  // tableName must exactly match a row the startup scan already created —
+  // SQLite can't parameterize identifiers, so this lookup against a known
+  // value is what makes the interpolation below safe. Rows are fetched by
+  // order/offset rather than id, so a gap in the id sequence (were one ever
+  // to occur) can't make a roll land on nothing.
+  function rollOnTable(tableName) {
+    const known = database
+      .prepare("SELECT tableName FROM rollerTableMetadata WHERE tableName = ?")
+      .get(tableName);
+    if (!known) throw new ValidationError("That table does not exist.");
+
+    const {count} = database.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get();
+    if (count === 0) throw new ValidationError("That table has no entries.");
+
+    const roll = crypto.randomInt(1, count + 1);
+    const row = database
+      .prepare(`SELECT description FROM ${tableName} ORDER BY id LIMIT 1 OFFSET ?`)
+      .get(roll - 1);
+    return {tableName, roll, count, description: row?.description ?? null};
+  }
+
+  // Record one roll (from rollOnTable) into the DM-only history log. Always
+  // stores the full description regardless of who rolled — access control is
+  // enforced where history is read, not where it's written.
+  function recordRoll({tableName, roll, count, description}) {
+    database
+      .prepare("INSERT INTO rollHistory (tableName, roll, count, description) VALUES (?, ?, ?, ?)")
+      .run(tableName, roll, count, description ?? null);
+  }
+
+  // The most recent rolls across every table, newest first, DM-only.
+  function listRollHistory(limit = 20) {
+    return database
+      .prepare("SELECT tableName, roll, count, description, rolledAt FROM rollHistory ORDER BY id DESC LIMIT ?")
+      .all(limit);
+  }
+
   return {
     raw: database, snapshot, commit, close: () => database.close(),
+    listRollerTables, rollOnTable, recordRoll, listRollHistory,
   };
 }

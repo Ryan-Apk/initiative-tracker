@@ -16,6 +16,7 @@ import {healthLabels, healthTone, publicHealthLabels,} from "../helpers/health.j
 import {ALL_CONDITIONS} from "../helpers/conditions.js";
 import DmAccess from "../helpers/dmAccess.jsx";
 import ConnectionStatus from "../helpers/connectionStatus.jsx";
+import {rollD20} from "../helpers/dice.js";
 
 
 const EMPTY_FORM = {
@@ -444,6 +445,15 @@ function CombatantRow({
     onResult(await commands.setCombatantAcVisible(combatant.id, !combatant.acVisible));
   }
 
+  // Reroll this combatant's base initiative die, after a confirm prompt.
+  // Same edit rule as every other field: the DM for enemies, a player for
+  // their own unlocked entry. Only the base roll changes — the modifier
+  // stays put and the total recomputes server-side.
+  async function rerollInitiative() {
+    if (!window.confirm(`Reroll initiative for ${combatant.name}?`)) return;
+    onResult(await commands.updateCombatant(combatant.id, {initiativeRoll: rollD20()}));
+  }
+
   return (<article
     className={`min-w-0 rounded-xl p-3 shadow-sm transition-colors sm:p-4 ${rowTone[tone]}`}
   >
@@ -501,15 +511,26 @@ function CombatantRow({
     <div
       className={`grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 ${showsExactHealth ? "lg:grid-cols-[minmax(11rem,2fr)_repeat(5,minmax(4.5rem,1fr))]" : "lg:grid-cols-[minmax(11rem,2fr)_repeat(2,minmax(4.5rem,1fr))]"}`}
     >
-      <EditableField
-        canEdit={canEdit}
-        className="col-span-2 sm:col-span-3 lg:col-span-1"
-        combatant={combatant}
-        connected={connected}
-        field="name"
-        inputMode="text"
-        onCommit={onResult}
-      />
+      <div className="col-span-2 flex min-w-0 items-end gap-2 sm:col-span-3 lg:col-span-1">
+        <EditableField
+          canEdit={canEdit}
+          className="min-w-0 flex-1"
+          combatant={combatant}
+          connected={connected}
+          field="name"
+          inputMode="text"
+          onCommit={onResult}
+        />
+        {canEdit && (<button
+          className="shrink-0 rounded-md border border-stone-400 bg-white/90 px-2 py-2 text-sm font-semibold text-ink transition hover:border-ember disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!connected}
+          onClick={rerollInitiative}
+          title="Reroll initiative"
+          type="button"
+        >
+          🎲 Roll
+        </button>)}
+      </div>
       <InitiativeControls
         combatant={combatant}
         canEdit={canEdit}
@@ -637,7 +658,7 @@ function AddCombatant({connected, isDm, onResult, playerLocked}) {
   </form>);
 }
 
-// Th e tracker's single source of client state. It owns the socket lifecycle,
+// The tracker's single source of client state. It owns the socket lifecycle,
 // the latest server snapshot, DM status, and transient error notices, and
 // composes the header, add form, and combat list. All child components send
 // commands and read from the snapshot this holds. Rendered at /init.
@@ -685,6 +706,20 @@ export default function InitiativeTracker() {
   // DM-only: reveal or hide AC for every enemy at once.
   async function setAllEnemyAc(visible) {
     handleResult(await commands.setAllEnemyAcVisible(visible));
+  }
+
+  // DM-only: reroll every combatant's initiative at once, after a confirm
+  // prompt. No dedicated bulk command exists server-side, so this just fires
+  // the same per-combatant update used by the row-level roll button for
+  // everyone currently in the tracker.
+  async function rerollAllInitiative() {
+    if (!window.confirm("Reroll initiative for every combatant?")) return;
+    const results = await Promise.all(
+      snapshot.combatants.map((combatant) =>
+        commands.updateCombatant(combatant.id, {initiativeRoll: rollD20()}),
+      ),
+    );
+    handleResult(results.find((result) => !result.ok) ?? {ok: true});
   }
 
   return (<div className="min-h-screen bg-parchment text-ink">
@@ -762,6 +797,14 @@ export default function InitiativeTracker() {
               type="button"
             >
               Hide all enemy AC
+            </button>
+            <button
+              className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-stone-700 hover:border-stone-500 disabled:opacity-50"
+              disabled={!connected}
+              onClick={rerollAllInitiative}
+              type="button"
+            >
+              🎲 Reroll all initiative
             </button>
             <button
               className="rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wide text-red-700 hover:bg-red-50 disabled:opacity-50"
