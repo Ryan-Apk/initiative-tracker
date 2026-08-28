@@ -326,3 +326,76 @@ test("conditions are toggled in insertion order and respect the same ownership r
   assert.equal(lockedEdit.ok, false);
   assert.match(lockedEdit.error, /locked/i);
 });
+
+test("combatants:reroll-initiative is DM-only and applies every roll in a single commit", async (context) => {
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "initiative-test-"));
+  const databasePath = path.join(temporaryDirectory, "tracker.sqlite");
+  const database = createDatabase(databasePath);
+  const httpServer = http.createServer();
+  const application = createApplication({
+    httpServer,
+    database,
+    dmPassword: "test-password",
+  });
+
+  await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+  const address = httpServer.address();
+  const url = `http://127.0.0.1:${address.port}`;
+  const publicClient = await connectClient(url);
+  const dmClient = await connectClient(url);
+
+  context.after(async () => {
+    publicClient.disconnect();
+    dmClient.disconnect();
+    await application.close();
+    database.close();
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  await command(dmClient, "dm:login", { password: "test-password" });
+
+  const ids = [];
+  for (let i = 0; i < 4; i++) {
+    const added = await command(dmClient, "combatant:add", {
+      name: `Enemy ${i}`,
+      initiativeRoll: 10,
+      initiativeModifier: 0,
+    });
+    ids.push(added.id);
+  }
+  for (let i = 0; i < 3; i++) {
+    const added = await command(publicClient, "combatant:add", {
+      name: `Player ${i}`,
+      initiativeRoll: 10,
+      initiativeModifier: 0,
+    });
+    ids.push(added.id);
+  }
+
+  const revisionBeforeReroll = database.snapshot().revision;
+  const rejected = await command(publicClient, "combatants:reroll-initiative", {
+    rolls: ids.map((id) => ({ id, roll: 1 })),
+  });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /DM/i);
+
+  const rolls = new Map(ids.map((id, index) => [id, index + 1]));
+  const accepted = await command(dmClient, "combatants:reroll-initiative", {
+    rolls: [...rolls].map(([id, roll]) => ({ id, roll })),
+  });
+  assert.equal(accepted.ok, true);
+
+  const snapshot = database.snapshot();
+  // One bulk update is one commit: exactly one revision bump for every
+  // combatant changed, not one per combatant (that's what the old N-separate
+  // volatile-emit approach did, and what made it lossy over a real network).
+  assert.equal(snapshot.revision, revisionBeforeReroll + 1);
+  for (const combatant of snapshot.combatants) {
+    assert.equal(combatant.initiativeRoll, rolls.get(combatant.id));
+  }
+
+  const invalidRoll = await command(dmClient, "combatants:reroll-initiative", {
+    rolls: [{ id: ids[0], roll: "not-a-number" }],
+  });
+  assert.equal(invalidRoll.ok, false);
+});

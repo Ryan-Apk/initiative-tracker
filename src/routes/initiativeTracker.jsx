@@ -709,17 +709,13 @@ export default function InitiativeTracker() {
   }
 
   // DM-only: reroll every combatant's initiative at once, after a confirm
-  // prompt. No dedicated bulk command exists server-side, so this just fires
-  // the same per-combatant update used by the row-level roll button for
-  // everyone currently in the tracker.
+  // prompt. Sent as one bulk command rather than N concurrent per-combatant
+  // updates — those are volatile packets, and firing a burst of them
+  // concurrently can silently drop some over a real network.
   async function rerollAllInitiative() {
     if (!window.confirm("Reroll initiative for every combatant?")) return;
-    const results = await Promise.all(
-      snapshot.combatants.map((combatant) =>
-        commands.updateCombatant(combatant.id, {initiativeRoll: rollD20()}),
-      ),
-    );
-    handleResult(results.find((result) => !result.ok) ?? {ok: true});
+    const rolls = snapshot.combatants.map((combatant) => ({id: combatant.id, roll: rollD20()}));
+    handleResult(await commands.rerollAllInitiative(rolls));
   }
 
   return (<div className="min-h-screen bg-parchment text-ink">

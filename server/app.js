@@ -445,6 +445,36 @@ export function createApplication({
       }
     });
 
+    // DM-only: reroll every combatant's initiative in one commit + one
+    // broadcast. The row-level reroll button fires one combatant:update per
+    // click, which is fine; firing N of those concurrently for a bulk reroll
+    // is not — each is a volatile packet, and a burst of them can silently
+    // drop some over a real network (worked on localhost in testing, only
+    // updated the first combatant in production). A single bulk event has
+    // nothing to drop mid-burst.
+    socket.on("combatants:reroll-initiative", (payload, acknowledge) => {
+      try {
+        if (!isDm(socket)) throw new ValidationError("Only the DM can reroll initiative.");
+        if (!Array.isArray(payload?.rolls)) {
+          throw new ValidationError("Invalid reroll payload.");
+        }
+        const rolls = payload.rolls.map(({id, roll}) => {
+          if (typeof id !== "string") throw new ValidationError("Invalid combatant.");
+          return {id, initiativeRoll: normalizeChanges({initiativeRoll: roll}).initiativeRoll};
+        });
+        const snapshot = database.commit((db) => {
+          const updateRoll = db.prepare("UPDATE combatants SET initiative_roll = ? WHERE id = ?");
+          for (const {id, initiativeRoll} of rolls) {
+            updateRoll.run(initiativeRoll, id);
+          }
+        });
+        sendSnapshot(snapshot);
+        respond(acknowledge, {ok: true, revision: snapshot.revision});
+      } catch (error) {
+        respond(acknowledge, {ok: false, error: serializeError(error)});
+      }
+    });
+
     // DM-only: flip the persistent player-editing lock (checked by
     // requirePlayerEditing on every player-originated mutation).
     socket.on("tracker:set-player-locked", (payload, acknowledge) => {

@@ -110,6 +110,7 @@ export const commands = {
     emitCommand("combatant:set-ac-visible", { id, visible }),
   setAllEnemyAcVisible: (visible) =>
     emitCommand("combatants:set-enemy-ac-visible", { visible }),
+  rerollAllInitiative: (rolls) => emitCommand("combatants:reroll-initiative", { rolls }),
   setPlayerLocked: (locked) => emitCommand("tracker:set-player-locked", { locked }),
   clearCombat: () => emitCommand("combat:clear"),
   requestState: () => emitCommand("state:request"),
