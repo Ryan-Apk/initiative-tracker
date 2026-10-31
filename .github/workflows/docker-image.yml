@@ -1,0 +1,82 @@
+name: docker-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-test-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image for Linux
+        run: |
+          docker build \
+            --tag ghcr.io/${{ github.repository_owner }}/initiative-tracker:${{ github.sha }} \
+            --tag ghcr.io/${{ github.repository_owner }}/initiative-tracker:${{ github.ref_name || 'manual' }} \
+            .
+
+      - name: Smoke test the built container
+        env:
+          DM_PASSWORD: test-password
+          PUBLIC_ORIGIN: http://127.0.0.1:3000
+        run: |
+          docker run -d --rm --name initiative-tracker-ci \
+            -p 3000:3000 \
+            -e DM_PASSWORD="${DM_PASSWORD}" \
+            -e PUBLIC_ORIGIN="${PUBLIC_ORIGIN}" \
+            -e PORT=3000 \
+            -e HOST=0.0.0.0 \
+            -e TRUST_PROXY=1 \
+            -e DATABASE_PATH=/data/initiative.sqlite \
+            -v initiative-tracker-ci-data:/data \
+            ghcr.io/${{ github.repository_owner }}/initiative-tracker:${{ github.sha }}
+
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS http://127.0.0.1:3000/ | grep -Ei 'Rivergate|initiative|tracker'
+
+          docker rm -f initiative-tracker-ci
+
+      - name: Export image as tarball for GitHub release
+        run: |
+          docker save ghcr.io/${{ github.repository_owner }}/initiative-tracker:${{ github.sha }} \
+            | gzip > initiative-tracker-${{ github.ref_name || github.sha }}.tar.gz
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: initiative-tracker-${{ github.ref_name || github.sha }}.tar.gz
+
+      - name: Push image to GHCR
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/initiative-tracker:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository_owner }}/initiative-tracker:${{ github.ref_name }}
