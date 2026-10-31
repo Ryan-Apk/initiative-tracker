@@ -9,7 +9,11 @@
     "build": "vite build",
     "start": "node scripts/start-production.mjs",
     "start:check": "node scripts/check-config.mjs production",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:unit": "node --test test/*.test.js",
+    "test:e2e": "node --test test/e2e.docker.js",
+    "docker:build": "docker build -t initiative-tracker:local .",
+    "docker:run": "docker run --rm --name initiative-tracker-e2e -p 3000:3000 -e DM_PASSWORD=test-password -e PUBLIC_ORIGIN=http://127.0.0.1:3000 -e PORT=3000 -e HOST=0.0.0.0 -e TRUST_PROXY=1 -e DATABASE_PATH=/data/initiative.sqlite -v initiative-tracker-e2e-data:/data initiative-tracker:local"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
