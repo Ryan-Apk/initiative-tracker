@@ -24,7 +24,7 @@ try {
   }
 } catch (error) {
   console.error(`\n[dev] Configuration error: ${error.message}`);
-  console.error("[dev] Run `npm run dev:check` after fixing the local environment.\n");
+  console.error("[dev] Run `pnpm run dev:check` after fixing the local environment.\n");
   process.exit(1);
 }
 

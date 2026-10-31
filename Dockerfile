@@ -6,14 +6,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install -g pnpm@11.6.0
+
+# pnpm-workspace.yaml carries allowBuilds; without it better-sqlite3's native build is skipped.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY index.html postcss.config.js tailwind.config.js vite.config.js ./
 COPY src ./src
 COPY server ./server
 COPY scripts ./scripts
-RUN npm run build && npm prune --omit=dev
+RUN pnpm run build && pnpm prune --prod
 
 FROM node:22-bookworm-slim AS runtime
 

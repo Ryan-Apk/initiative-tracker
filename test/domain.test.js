@@ -81,10 +81,14 @@ test("normalizeChanges rejects protected and non-integer values", () => {
     () => normalizeChanges({ playerControlled: true }),
     ValidationError,
   );
-  assert.throws(
-    () => normalizeChanges({ initiativeRoll: "12.5" }),
-    ValidationError,
-  );
+  for (const bad of ["12.5", "", "  ", "0x10", "1e3", true, 1e300, [7]]) {
+    assert.throws(
+      () => normalizeChanges({ initiativeRoll: bad }),
+      ValidationError,
+      `initiativeRoll ${JSON.stringify(bad)} should be rejected`,
+    );
+  }
+  assert.deepEqual(normalizeChanges({ initiativeRoll: " -3 " }), { initiativeRoll: -3 });
 });
 
 test("server and client health tones agree at every exact boundary", () => {

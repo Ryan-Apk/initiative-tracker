@@ -31,8 +31,12 @@ function parseInteger(value, field, { optional = false, minimum = null } = {}) {
     return null;
   }
 
-  const parsed = typeof value === "number" ? value : Number(value);
-  if (!Number.isInteger(parsed)) {
+  // Only real numbers or plain digit strings: Number() would turn "", " ",
+  // true or "0x10" into integers, and huge values into unsafe floats.
+  const wellFormed = typeof value === "number"
+    || (typeof value === "string" && /^\s*-?\d+\s*$/.test(value));
+  const parsed = Number(value);
+  if (!wellFormed || !Number.isSafeInteger(parsed)) {
     throw new ValidationError(`${field} must be a whole number.`);
   }
   if (minimum !== null && parsed < minimum) {
