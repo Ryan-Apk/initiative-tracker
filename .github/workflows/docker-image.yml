@@ -43,11 +43,13 @@ jobs:
         env:
           DM_PASSWORD: test-password
           PUBLIC_ORIGIN: http://127.0.0.1:3000
+          ALLOW_INSECURE_ORIGIN: "true"
         run: |
           docker run -d --rm --name initiative-tracker-ci \
             -p 3000:3000 \
             -e DM_PASSWORD="${DM_PASSWORD}" \
             -e PUBLIC_ORIGIN="${PUBLIC_ORIGIN}" \
+            -e ALLOW_INSECURE_ORIGIN="${ALLOW_INSECURE_ORIGIN}" \
             -e PORT=3000 \
             -e HOST=0.0.0.0 \
             -e TRUST_PROXY=1 \
@@ -55,7 +57,8 @@ jobs:
             -v initiative-tracker-ci-data:/data \
             "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}"
 
-          for i in $(seq 1 60); do
+          # shorter and clearer health loop
+          for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
               break
             fi
