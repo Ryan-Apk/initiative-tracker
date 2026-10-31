@@ -1,10 +1,10 @@
 name: docker-release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,19 +24,20 @@ jobs:
       - name: Normalize image owner
         run: echo "IMAGE_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      - name: Log in to GitHub Container Registry
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute release metadata
+        shell: bash
+        run: |
+          COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
+          SAFE_SUBJECT="${COMMIT_SUBJECT//[^a-zA-Z0-9 ._-]/-}"
+          TS="$(date +%Y%m%d-%H%M%S)"
+          echo "RELEASE_TAG=${GITHUB_REF_NAME:-manual-${TS}}" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=${SAFE_SUBJECT}" >> "$GITHUB_ENV"
 
-      - name: Build Docker image for Linux
+      - name: Build Docker image
         run: |
           docker build \
             --tag "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}" \
-            --tag "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_REF_NAME:-manual}" \
+            --tag "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${{ env.RELEASE_TAG }}" \
             .
 
       - name: Smoke test the built container
@@ -57,7 +58,6 @@ jobs:
             -v initiative-tracker-ci-data:/data \
             "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}"
 
-          # shorter and clearer health loop
           for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
               break
@@ -70,19 +70,14 @@ jobs:
 
           docker rm -f initiative-tracker-ci
 
-      - name: Export image as tarball for GitHub release
+      - name: Export tarball
         run: |
           docker save "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}" \
-            | gzip > "initiative-tracker-${GITHUB_REF_NAME:-${GITHUB_SHA}}.tar.gz"
+            | gzip > "initiative-tracker-${GITHUB_SHA}.tar.gz"
 
-      - name: Upload release asset
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: initiative-tracker-${{ github.ref_name || github.sha }}.tar.gz
-
-      - name: Push image to GHCR
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          docker push "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}"
-          docker push "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_REF_NAME}"
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          files: initiative-tracker-${{ github.sha }}.tar.gz
