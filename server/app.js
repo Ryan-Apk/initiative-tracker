@@ -30,6 +30,15 @@ const clientDist = path.resolve(moduleDirectory, "../dist");
 // Minimum gap between accepted rolls from the same socket.
 const ROLL_RATE_LIMIT_MS = 1000;
 
+// Wrong DM passwords allowed per window, across all sockets (a reconnect
+// would reset a per-socket counter, so the limit is global).
+// shortcut: one global counter, so someone spamming wrong guesses also blocks the real DM for up to a minute; switch to per-IP limits if that ever happens.
+const LOGIN_FAILURE_LIMIT = 5;
+const LOGIN_WINDOW_MS = 60_000;
+
+// A DM token not used for this long stops working (sliding expiry).
+const DM_SESSION_IDLE_MS = 12 * 60 * 60 * 1000;
+
 // Constant-time password comparison. Bails on length mismatch first (that leaks
 // only length), then uses timingSafeEqual so a match cannot be timed byte by byte.
 function safePasswordMatch(candidate, expected) {
@@ -77,13 +86,14 @@ export function createApplication({
       callback(null, !origin || acceptedOrigins.has(origin));
     } : undefined,
   });
-  // Live DM sessions: token -> last-seen timestamp. In-memory only, so all DM
+  // Live DM sessions: token -> last-used timestamp. In-memory only, so all DM
   // sessions vanish on restart; combat data (in SQLite) survives.
   const dmSessions = new Map();
+  // Timestamps of recent wrong DM passwords (never more than the limit).
+  let loginFailures = [];
 
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxy);
-  app.use(express.json());
   // Lightweight liveness probe used by the dev launcher and container health check.
   app.get("/api/health", (_request, response) => {
     response.json({ok: true, revision: database.snapshot().revision});
@@ -98,18 +108,29 @@ export function createApplication({
     });
   }
 
-  // Whether this socket currently holds a valid DM capability token.
-  function isDm(socket) {
-    const token = socket.data.dmToken;
-    return Boolean(token && dmSessions.has(token));
+  // Whether a token is a live DM session. Using it refreshes its idle timer;
+  // a token idle past DM_SESSION_IDLE_MS is dropped.
+  function sessionIsLive(token) {
+    const lastUsed = dmSessions.get(token);
+    if (lastUsed === undefined) return false;
+    if (Date.now() - lastUsed > DM_SESSION_IDLE_MS) {
+      dmSessions.delete(token);
+      return false;
+    }
+    dmSessions.set(token, Date.now());
+    return true;
   }
 
-  // Re-attach a DM token to a socket after (re)connection, refreshing its
-  // last-seen time. Returns false if the token is unknown/expired.
+  // Whether this socket currently holds a valid DM capability token.
+  function isDm(socket) {
+    return sessionIsLive(socket.data.dmToken);
+  }
+
+  // Re-attach a DM token to a socket after (re)connection. Returns false if
+  // the token is unknown/expired.
   function resumeDmSession(socket, token) {
-    if (typeof token !== "string" || !dmSessions.has(token)) return false;
+    if (!sessionIsLive(token)) return false;
     socket.data.dmToken = token;
-    dmSessions.set(token, Date.now());
     return true;
   }
 
@@ -240,7 +261,14 @@ export function createApplication({
     // token the client stores and presents on future connects. The DM
     // immediately receives an unredacted snapshot.
     socket.on("dm:login", (payload, acknowledge) => {
+      const now = Date.now();
+      loginFailures = loginFailures.filter((time) => now - time < LOGIN_WINDOW_MS);
+      if (loginFailures.length >= LOGIN_FAILURE_LIMIT) {
+        respond(acknowledge, {ok: false, error: "Too many wrong passwords. Wait a minute and try again."});
+        return;
+      }
       if (!safePasswordMatch(payload?.password, dmPassword)) {
+        loginFailures.push(now);
         respond(acknowledge, {ok: false, error: "Incorrect DM password."});
         return;
       }

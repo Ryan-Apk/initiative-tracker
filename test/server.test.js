@@ -399,3 +399,44 @@ test("combatants:reroll-initiative is DM-only and applies every roll in a single
   });
   assert.equal(invalidRoll.ok, false);
 });
+
+test("dm:login locks out after repeated wrong passwords, and idle DM tokens expire", async (context) => {
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "initiative-test-"));
+  const database = createDatabase(path.join(temporaryDirectory, "tracker.sqlite"));
+  const httpServer = http.createServer();
+  const application = createApplication({ httpServer, database, dmPassword: "test-password" });
+  await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${httpServer.address().port}`;
+  const client = await connectClient(url);
+  context.after(async () => {
+    context.mock.timers.reset();
+    client.disconnect();
+    await application.close();
+    database.close();
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  // Only Date is faked, so socket.io's own timers keep working.
+  context.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+
+  const login = await command(client, "dm:login", { password: "test-password" });
+  assert.equal(login.ok, true);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const wrong = await command(client, "dm:login", { password: "guess" });
+    assert.equal(wrong.error, "Incorrect DM password.");
+  }
+  // Locked: even the right password is refused until the window passes.
+  const locked = await command(client, "dm:login", { password: "test-password" });
+  assert.equal(locked.ok, false);
+  assert.match(locked.error, /Too many/);
+  context.mock.timers.tick(60_001);
+  assert.equal((await command(client, "dm:login", { password: "test-password" })).ok, true);
+
+  // A token unused for 12 hours stops working, even for a fresh socket.
+  context.mock.timers.tick(12 * 60 * 60 * 1000 + 1);
+  const resumed = await command(client, "dm:resume", { token: login.token });
+  assert.equal(resumed.ok, false);
+  const clear = await command(client, "combat:clear");
+  assert.equal(clear.ok, false);
+});

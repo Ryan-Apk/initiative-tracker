@@ -6,19 +6,19 @@ Designed from the ground up by me, written with help from Claude, used regularly
 
 ## Development
 
-Use Node 22 and npm. Create the local environment before starting:
+Use Node 22 and pnpm 11 (`npm install -g pnpm@11.6.0`). Create the local environment before starting:
 
 ```bash
 cp .env.development.example .env
 # Replace DM_PASSWORD with a long random value
-npm install
-npm run dev:check
-npm run dev
+pnpm install
+pnpm run dev:check
+pnpm run dev
 ```
 
 Open `http://localhost:5173`.
 
-`npm run dev` is a coordinated launcher, not two unrelated background commands. It:
+`pnpm run dev` is a coordinated launcher, not two unrelated background commands. It:
 
 1. validates the password, ports, origins, and database configuration;
 2. starts the backend on `DEV_SERVER_PORT` (default `3001`);
@@ -44,10 +44,10 @@ Development variables are loaded from `.env.development.local`, `.env.developmen
 Useful commands:
 
 ```bash
-npm test
-npm run build
-npm run dev:check
-npm run start:check
+pnpm test
+pnpm run build
+pnpm run dev:check
+pnpm run start:check
 ```
 
 ## Productio
@@ -68,7 +68,8 @@ Set secrets and start the service:
 ```bash
 export DM_PASSWORD='use-a-long-random-password'
 export PUBLIC_ORIGIN='https://init.example.com'
-docker compose up --build -d
+docker compose build --pull
+docker compose up -d
 ```
 
 Compose binds Node to `127.0.0.1:3000`, so it is reachable by a reverse proxy on the host but not directly exposed to the internet. The named `initiative-data` volume persists `/data/initiative.sqlite`.
@@ -148,7 +149,9 @@ This remains a temporary table tool:
 
 - anyone who knows the password can become a DM;
 - DM sessions disappear whenever Node restarts;
-- there is no user identity, rate limiting, audit history, or multi-replica coordination;
+- wrong DM passwords are limited to 5 per minute across all clients, so a flood of guesses also blocks the real DM for up to a minute;
+- a DM token stops working after 12 hours without use;
+- there is no user identity, audit history, or multi-replica coordination;
 - the origin restriction is not a substitute for authentication; and
 - HTTPS/WSS is mandatory outside a trusted local network.
 
