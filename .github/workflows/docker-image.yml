@@ -75,6 +75,13 @@ jobs:
           docker save "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}" \
             | gzip > "initiative-tracker-${GITHUB_SHA}.tar.gz"
 
+      - name: Push image to GHCR
+        run: |
+          docker push "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_SHA}"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            docker push "ghcr.io/${IMAGE_OWNER}/initiative-tracker:${GITHUB_REF_NAME}"
+          fi
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
